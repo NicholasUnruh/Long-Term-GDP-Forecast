@@ -1,0 +1,466 @@
+# ==============================================================================
+#  LONG-TERM GDP FORECAST CONFIGURATION
+# ==============================================================================
+#
+#  This file controls every assumption in the GDP forecast model.
+#  All growth rates are expressed as decimals (e.g. 0.010 = 1.0% per year).
+#
+#  The model uses a Cobb-Douglas production function:
+#
+#      GDP Growth  =  TFP Growth  +  alpha x Capital Growth  +  (1 - alpha) x Labor Growth
+#
+#  where alpha is the capital share of output (default 0.30, meaning 30% capital / 70% labor).
+#
+#  To experiment, start by adjusting these high-impact parameters:
+#    - tfp.national_growth_rate     (biggest lever on long-term growth)
+#    - capital.investment_to_gdp_ratio  (how much of GDP is reinvested)
+#    - labor.lfpr_trend             (workforce participation changes)
+#    - scenarios                    (pre-built alternative futures)
+#
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+#  FORECAST HORIZON
+# ------------------------------------------------------------------------------
+# Defines the time window for the forecast.
+
+forecast:
+  start_quarter: "2025:Q4"        # First projected quarter (data ends 2025:Q3)
+  end_year: 2050                  # Final year of the projection
+  frequency: "quarterly"          # GDP is projected quarterly; population annually
+
+
+# ==============================================================================
+#  PRODUCTION FUNCTION  (Cobb-Douglas)
+# ==============================================================================
+# These are the structural parameters of the growth model.
+#
+#   alpha = capital's share of output. CBO uses 0.30.
+#           Raise it (e.g. 0.35) to make investment matter more.
+#           Lower it (e.g. 0.25) to make labor matter more.
+#
+#   depreciation_rate = annual rate at which capital wears out.
+#           Higher depreciation means more investment is needed just to maintain
+#           the current capital stock, leaving less for growth.
+
+production_function:
+  alpha: 0.30                     # Capital share  |  Range: 0.25 - 0.40
+  depreciation_rate: 0.05         # Annual depreciation  |  Range: 0.03 - 0.08
+
+
+# ==============================================================================
+#  TOTAL FACTOR PRODUCTIVITY  (TFP)
+# ==============================================================================
+# TFP captures technological progress, innovation, and efficiency gains.
+# It is the SINGLE MOST IMPORTANT driver of long-term GDP growth.
+#
+# Historical context:
+#   - US long-run average (1950-2020):  ~1.0% - 1.5%
+#   - Post-2005 slowdown:              ~0.5% - 0.8%
+#   - CBO baseline assumption:         ~1.0%
+#
+# Try:  0.005 (stagnation)  |  0.010 (normal)  |  0.015 (optimistic)  |  0.020+ (tech boom)
+
+tfp:
+  national_growth_rate: 0.012     # 1.2% annual TFP growth
+                                  # CBO baseline (~1.0%) + moderate AI boost (+0.15pp)
+                                  # Sources: CBO 2025 outlook, Penn Wharton Budget Model, OECD AI productivity
+
+  # Industry-specific TFP overrides
+  # Industries not listed here use the national_growth_rate above.
+  # Calibrated from BLS 2019-2024 industry TFP data, OECD AI exposure analysis,
+  # and McKinsey automation potential estimates.
+  by_industry:
+    # --- High TFP growth (technology-driven, high AI exposure) ---
+    "Information": 0.022                                                          # 2.2%  (AI-native: software, data, cloud; BLS strong recent TFP)
+    "Professional, scientific, and technical services": 0.018                     # 1.8%  (BLS: 2.5% TFP 2019-24; AI copilots for R&D, consulting)
+    "Finance and insurance": 0.014                                                # 1.4%  (high AI exposure per OECD; fintech, automation)
+    "Management of companies and enterprises": 0.012                              # 1.2%  (BLS: 3.0% TFP 2019-24, highest in recent cycle)
+
+    # --- Moderate TFP growth ---
+    "Wholesale trade": 0.009                                                      # 0.9%  (AI logistics optimization)
+    "Manufacturing": 0.008                                                        # 0.8%  (near-zero recent TFP; slow AI diffusion in physical processes)
+    "Transportation and warehousing": 0.008                                       # 0.8%  (autonomous vehicles, route optimization — long adoption timelines)
+    "Retail trade": 0.008                                                         # 0.8%  (BLS: strong 2024 TFP; e-commerce + AI pricing/inventory)
+    "Administrative and support and waste management and remediation services": 0.008  # 0.8%  (high automation potential: back-office tasks)
+    "Agriculture, forestry, fishing and hunting": 0.007                           # 0.7%  (BLS: strong recent TFP; precision ag + AI)
+    "Construction": 0.005                                                         # 0.5%  (very low tech adoption, labor shortage headwinds)
+
+    # --- Lower TFP growth (labor-intensive or regulated) ---
+    "Health care and social assistance": 0.006                                    # 0.6%  (AI diagnostics/admin, but Baumol's disease + regulation)
+    "Utilities": 0.005                                                            # 0.5%  (regulated, capital-heavy, slow change)
+    "Arts, entertainment, and recreation": 0.005                                  # 0.5%  (mixed: AI content creation vs live experience)
+    "Mining, quarrying, and oil and gas extraction": 0.005                         # 0.5%  (BLS: 2.5% recovery 2019-24; resource depletion partially offset)
+    "Educational services": 0.005                                                 # 0.5%  (AI tutoring/admin, slow institutional adoption)
+    "Real estate and rental and leasing": 0.004                                   # 0.4%  (largely land/structure value, minimal AI gain)
+    "Accommodation and food services": 0.004                                      # 0.4%  (high automation potential but very cost-sensitive)
+    "Other services (except government and government enterprises)": 0.004        # 0.4%  (personal services, minimal AI impact)
+    "Government and government enterprises": 0.003                                # 0.3%  (very low AI adoption: McKinsey 20% expect impact)
+
+  # State-specific TFP overrides (optional)
+  # Use this to give individual states different TFP assumptions.
+  # Example:  "California": 0.015
+  by_state: {}
+
+  # Speed at which lagging states converge toward the national TFP level.
+  # 0.0 = no convergence  |  0.02 = slow convergence  |  0.05 = fast convergence
+  convergence_rate: 0.02
+
+
+# ==============================================================================
+#  CAPITAL & INVESTMENT  (CapEx)
+# ==============================================================================
+# Controls how fast the capital stock grows. Capital growth depends on:
+#
+#   Capital Growth  =  (Investment / GDP) / (Capital / GDP)  -  Depreciation  +  CapEx Adjustment
+#                   =  investment_to_gdp_ratio / capital_output_ratio  -  depreciation_rate  +  capex_growth_adjustment
+#
+# With defaults: 0.21 / 3.0 - 0.05 + 0.002 = 2.20% annual capital growth.
+#
+# To simulate an investment boom:   raise investment_to_gdp_ratio or capex_growth_adjustment
+# To simulate an investment slump:  lower them or make capex_growth_adjustment negative
+
+capital:
+  investment_to_gdp_ratio: 0.21   # Share of GDP that goes to investment  |  Range: 0.15 - 0.30
+                                  # 2024 actual: 21.6% (CEIC GFCF/GDP). Reflects ongoing AI capex.
+  capital_output_ratio: 3.0       # K/Y ratio (how much capital per unit of GDP)  |  Range: 2.5 - 4.0
+  capex_growth_adjustment: 0.002  # Extra annual boost/drag on investment  |  Range: -0.02 to +0.02
+                                  # Modest AI infrastructure buildout (data centers, cloud, IP)
+
+  # Industry-specific capital parameters
+  # investment_ratio = share of industry GDP reinvested in capital
+  # alpha = industry-specific capital share (overrides the global alpha above)
+  #
+  # Capital-heavy industries (utilities, mining, real estate) have high alpha and investment.
+  # Labor-heavy industries (education, health, retail) have low alpha and investment.
+  by_industry:
+
+    # --- Capital-intensive industries (alpha > 0.35) ---
+    "Real estate and rental and leasing":
+      investment_ratio: 0.25      # Heavy property investment
+      alpha: 0.50                 # Very capital-driven output
+
+    "Utilities":
+      investment_ratio: 0.35      # Power plants, grid infrastructure
+      alpha: 0.45
+
+    "Mining, quarrying, and oil and gas extraction":
+      investment_ratio: 0.30      # Drilling, extraction equipment
+      alpha: 0.45
+
+    "Manufacturing":
+      investment_ratio: 0.25      # Factories, machinery
+      alpha: 0.40
+    "Durable goods manufacturing":
+      investment_ratio: 0.25
+      alpha: 0.40
+    "Nondurable goods manufacturing":
+      investment_ratio: 0.25
+      alpha: 0.40
+
+    "Military":
+      investment_ratio: 0.20      # Defense equipment & facilities
+      alpha: 0.35
+
+    "Agriculture, forestry, fishing and hunting":
+      investment_ratio: 0.20      # Land, equipment
+      alpha: 0.35
+
+    "Construction":
+      investment_ratio: 0.20      # Heavy equipment
+      alpha: 0.35
+
+    "Transportation and warehousing":
+      investment_ratio: 0.25      # Vehicles, terminals, infrastructure
+      alpha: 0.35
+
+    "Information":
+      investment_ratio: 0.30      # Data centers, networks, IP
+      alpha: 0.35
+
+    # --- Balanced industries (alpha ~ 0.28-0.30) ---
+    "Wholesale trade":
+      investment_ratio: 0.18
+      alpha: 0.30
+
+    "Finance and insurance":
+      investment_ratio: 0.20      # IT systems, offices
+      alpha: 0.30
+
+    "Management of companies and enterprises":
+      investment_ratio: 0.18
+      alpha: 0.30
+
+    "Arts, entertainment, and recreation":
+      investment_ratio: 0.18
+      alpha: 0.30
+
+    "Accommodation and food services":
+      investment_ratio: 0.18      # Hotels, restaurants
+      alpha: 0.30
+
+    "Government and government enterprises":
+      investment_ratio: 0.15
+      alpha: 0.30
+    "Federal civilian":
+      investment_ratio: 0.15
+      alpha: 0.30
+    "State and local":
+      investment_ratio: 0.15
+      alpha: 0.30
+
+    # --- Labor-intensive industries (alpha < 0.28) ---
+    "Professional, scientific, and technical services":
+      investment_ratio: 0.18      # Mostly human capital
+      alpha: 0.28
+
+    "Retail trade":
+      investment_ratio: 0.15
+      alpha: 0.25
+
+    "Health care and social assistance":
+      investment_ratio: 0.15      # Equipment, but mostly labor
+      alpha: 0.25
+
+    "Administrative and support and waste management and remediation services":
+      investment_ratio: 0.15
+      alpha: 0.25
+
+    "Other services (except government and government enterprises)":
+      investment_ratio: 0.15
+      alpha: 0.25
+
+    "Educational services":
+      investment_ratio: 0.12      # Very labor-driven
+      alpha: 0.20
+
+
+# ==============================================================================
+#  LABOR FORCE
+# ==============================================================================
+# Labor growth is derived from population growth plus these adjustments:
+#
+#   Labor Growth  =  Population Growth  +  LFPR Trend  +  Working-Age Share Trend  +  Hours Growth
+#
+# All values are annual rates. Negative values represent demographic headwinds
+# (aging population, people leaving the workforce).
+#
+# Historical context:
+#   - US LFPR peaked at ~67% in 2000, declined to ~62% by 2020
+#   - Working-age share (15-64) declining as baby boomers retire
+
+labor:
+  lfpr_trend: -0.0014             # Labor force participation rate change per year  |  -0.14 pp/yr
+                                  # BLS projects 62.6% (2023) to 61.2% (2033) = -0.14 pp/yr
+                                  # Range: -0.003 (rapid aging) to +0.001 (policy boost)
+
+  working_age_share_trend: -0.002 # Change in 15-64 age group as share of population  |  -0.2 pp/yr
+                                  # Census: 64% (2020) to ~57% (2060). Boomers retiring.
+                                  # Range: -0.004 (Japan-style aging) to 0.0 (stable demographics)
+
+  natural_unemployment_rate: 0.04 # Long-run unemployment rate  |  4.0%
+                                  # Range: 0.03 - 0.06
+
+  hours_growth: -0.001            # Annual change in average hours worked per worker
+                                  # BLS: avg weekly hours declined 34.6 (2019) to 34.3 (2024)
+                                  # Range: -0.002 (shorter workweeks) to +0.001
+
+
+# ==============================================================================
+#  POPULATION
+# ==============================================================================
+# Population drives the labor force, which drives GDP.
+#
+# The model uses decelerating growth with national target calibration:
+#   1. Computes each state's recent CAGR (compound annual growth rate)
+#   2. Generates a national trajectory that smoothly decelerates to hit the target
+#   3. Evolves state shares based on relative growth differentials
+#   4. National total is guaranteed to match the target path exactly
+#
+# Reference projections for 2050 (sources for default calibration):
+#   - Cooper Center (UVA, 2024):  ~371 million
+#   - US Census Bureau (2023):    ~369 million
+#   - CBO (Jan 2026):             ~360 million  (lower immigration scenario)
+
+population:
+  fit_start_year: 2010            # Compute recent CAGR from this year  |  Range: 2000 - 2020
+                                  # More recent = captures current migration trends better
+                                  # Earlier = smooths out short-term volatility
+
+  # National population target for the end year (2050).
+  # Default 370M is the midpoint of Census Bureau (~369M) and Cooper Center (~371M).
+  # CBO projects ~360M under more conservative immigration assumptions.
+  # Range: 355_000_000 (low immigration) to 385_000_000 (high immigration)
+  national_pop_target: 370000000
+
+  # Annual decay rate for population growth.
+  # Controls how quickly growth decelerates over the forecast horizon.
+  # Higher = growth slows faster (front-loaded growth)
+  # Lower = growth stays elevated longer (more linear path to target)
+  # Range: 0.01 (nearly linear) to 0.08 (sharp early deceleration)
+  growth_deceleration: 0.04
+
+  # Annual damping of state-level growth differentials.
+  # Controls how quickly fast/slow-growing states converge toward the national average.
+  # Higher = states converge faster (more uniform growth by end of forecast)
+  # Lower = states maintain their growth differentials longer
+  # Range: 0.01 (persistent divergence) to 0.06 (rapid convergence)
+  share_damping: 0.03
+
+  # State-specific CAGR overrides (annual growth rate, e.g. 0.012 = 1.2%/yr).
+  # Overrides the fitted CAGR for that state. State still gets scaled to national target.
+  # Example:
+  #   "Texas": 0.015              # Force Texas base growth to 1.5% per year
+  #   "West Virginia": -0.005     # Force WV to decline at 0.5% per year
+  by_state: {}
+
+
+# ==============================================================================
+#  INDUSTRY STRUCTURAL SHIFTS
+# ==============================================================================
+# Over time, the economy shifts — tech and services grow as a share of GDP,
+# while manufacturing and agriculture shrink. These shift rates adjust each
+# industry's share of state GDP by a fixed amount per year.
+#
+# Positive = growing share  |  Negative = shrinking share
+# Industries not listed keep their current share.
+#
+# Set structural_shift to false to disable all shifts (each industry keeps
+# its current share of state GDP throughout the forecast).
+
+industry:
+  structural_shift: true
+
+  shift_rates:
+    # --- Growing sectors ---
+    "Information": 0.0025                                               # +0.25 pp/yr  (AI/cloud/data accelerating)
+    "Professional, scientific, and technical services": 0.0020          # +0.20 pp/yr  (AI consulting, R&D growth)
+    "Health care and social assistance": 0.001                          # +0.10 pp/yr  (aging population demand)
+    "Finance and insurance": 0.0005                                     # +0.05 pp/yr
+
+    # --- Shrinking sectors ---
+    "Manufacturing": -0.0012                                            # -0.12 pp/yr  (tariffs/reshoring partially slow decline)
+    "Retail trade": -0.001                                              # -0.10 pp/yr  (e-commerce consolidation)
+    "Mining, quarrying, and oil and gas extraction": -0.0008            # -0.08 pp/yr  (energy transition, slower than expected)
+    "Agriculture, forestry, fishing and hunting": -0.0004               # -0.04 pp/yr
+    "Utilities": -0.0003                                                # -0.03 pp/yr
+
+
+# ==============================================================================
+#  SCENARIOS
+# ==============================================================================
+# Pre-built alternative futures. Each scenario overrides specific parameters
+# from the baseline config above. Run all scenarios with:  python main.py --all
+#
+# Only the parameters you list are changed; everything else uses the baseline.
+# You can add your own scenarios by following the same pattern.
+
+scenarios:
+
+  # --- Baseline: uses all defaults above, no overrides ---
+  # Implied GDP CAGR: ~1.8%/yr
+  # Narrative: Moderate AI adoption delivers measurable but modest productivity gains
+  # concentrated in knowledge-intensive sectors. Demographics remain the primary headwind.
+  # Aligned with FOMC longer-run 1.8% GDP growth estimate and CBO central case.
+  # Sources: CBO Budget Outlook 2025-2035, FOMC Dec 2025 projections, Penn Wharton Budget Model
+  baseline: {}
+
+  # --- High Growth: strong AI adoption + favorable demographics + high investment ---
+  # Implied GDP CAGR: ~2.5%/yr
+  # Narrative: AI adoption accelerates through favorable policy (immigration reform,
+  # R&D tax incentives), strong investment climate, and institutional adaptation.
+  # OECD upper-range AI impact (0.4-0.6pp TFP boost) plus sustained demographic tailwinds
+  # from higher immigration. Investment boom driven by AI infrastructure + reshoring.
+  # Sources: OECD AI Productivity (2024), CBO high-TFP scenario (+0.5pp), BLS labor projections
+  high_growth:
+    tfp:
+      national_growth_rate: 0.015           # 1.5% TFP  (CBO high scenario = baseline + 0.5pp)
+      by_industry:
+        "Information": 0.028                # 2.8%  (accelerated AI/cloud adoption)
+        "Professional, scientific, and technical services": 0.024   # 2.4%
+        "Finance and insurance": 0.020      # 2.0%  (AI-driven fintech expansion)
+        "Management of companies and enterprises": 0.018            # 1.8%
+    capital:
+      investment_to_gdp_ratio: 0.23         # Higher investment climate + AI capex
+      capex_growth_adjustment: 0.004        # +0.4 pp investment boost
+    labor:
+      lfpr_trend: -0.0005                   # Immigration reform keeps workforce younger
+      working_age_share_trend: -0.0015      # More immigration tilts age profile
+      natural_unemployment_rate: 0.035      # Tighter labor market
+      hours_growth: 0.0                     # Remote work flexibility maintains hours
+    population:
+      national_pop_target: 380000000        # Higher immigration scenario
+      growth_deceleration: 0.03             # More sustained growth
+
+  # --- Low Growth: AI disappointment + demographic headwinds + investment slump ---
+  # Implied GDP CAGR: ~0.9%/yr
+  # Narrative: AI fails to deliver broad productivity gains (Acemoglu thesis vindicated).
+  # The AI hype cycle peaks without meaningful economic transformation. Combined with
+  # aging demographics, reduced immigration, and weak business investment, the US enters
+  # a Japan-style stagnation period. CBO low-TFP scenario territory.
+  # Sources: Acemoglu (2024) AI skeptic view, CBO low-TFP scenario (-0.5pp), Census low-immigration
+  low_growth:
+    tfp:
+      national_growth_rate: 0.008           # 0.8% TFP  (CBO low scenario territory)
+      by_industry:
+        "Information": 0.012                # 1.2%  (AI delivers only incremental gains)
+        "Manufacturing": 0.003              # 0.3%  (offshoring + automation stalls)
+        "Mining, quarrying, and oil and gas extraction": 0.001  # 0.1%  (resource depletion)
+    capital:
+      investment_to_gdp_ratio: 0.18         # Investment slump, policy uncertainty
+      capex_growth_adjustment: -0.002       # -0.2 pp investment drag
+    labor:
+      lfpr_trend: -0.002                    # Accelerated retirement, reduced immigration
+      working_age_share_trend: -0.002       # Continued aging pressure
+      natural_unemployment_rate: 0.05       # Structural unemployment rises
+      hours_growth: -0.001                  # Shorter workweeks from weak demand
+    population:
+      national_pop_target: 360000000        # Below CBO's 360M (sharply curtailed immigration)
+      growth_deceleration: 0.05             # Growth front-loaded then stalls
+
+  # --- AI Boom: transformative AI reshapes the economy ---
+  # Implied GDP CAGR: ~3.1%/yr
+  # Narrative: AI proves truly transformative (Aghion/Goldman optimistic thesis).
+  # Massive capital deepening in AI infrastructure drives TFP gains approaching 1960s
+  # levels. AI augments workers across most sectors, creating new job categories.
+  # Capital becomes more productive (lower K/Y ratio from software/IP) but also depreciates
+  # faster (shorter-lived AI assets). Economy-wide restructuring toward knowledge sectors.
+  # Sources: Aghion & Bunel (2024), Goldman Sachs AI scenarios, McKinsey AI automation potential
+  ai_boom:
+    tfp:
+      national_growth_rate: 0.020           # 2.0% TFP  (1960s-level: Aghion +1.0pp AI boost)
+      by_industry:
+        "Information": 0.045                # 4.5%  (AI-native: platforms, digital infrastructure)
+        "Professional, scientific, and technical services": 0.035   # 3.5%  (AI copilots transform R&D, legal, consulting)
+        "Finance and insurance": 0.030      # 3.0%  (AI trading, underwriting, fraud detection)
+        "Management of companies and enterprises": 0.025            # 2.5%  (AI decision support, corporate optimization)
+        "Administrative and support and waste management and remediation services": 0.020  # 2.0%  (back-office AI automation)
+        "Health care and social assistance": 0.018  # 1.8%  (AI diagnostics, drug discovery)
+        "Manufacturing": 0.018              # 1.8%  (smart factories, generative design)
+        "Wholesale trade": 0.016            # 1.6%  (AI supply chain optimization)
+        "Retail trade": 0.016               # 1.6%  (AI personalization, autonomous checkout)
+        "Transportation and warehousing": 0.015  # 1.5%  (autonomous vehicles, route optimization)
+    capital:
+      investment_to_gdp_ratio: 0.24         # AI capex adds 1.5-2pp to investment ratio
+      capital_output_ratio: 2.8             # AI capital more productive per dollar (software/IP vs structures)
+      capex_growth_adjustment: 0.008        # +0.8 pp  (massive AI infrastructure investment)
+    labor:
+      lfpr_trend: -0.001                    # AI creates new roles, partially offsetting aging
+      natural_unemployment_rate: 0.035      # AI augments rather than displaces workers
+      hours_growth: -0.001                  # Productivity gains don't extend hours
+    production_function:
+      depreciation_rate: 0.055              # Higher: IT/software/AI assets depreciate faster
+    industry:
+      structural_shift: true
+      shift_rates:
+        "Information": 0.004                # +0.40 pp/yr  (AI platforms, digital infrastructure)
+        "Professional, scientific, and technical services": 0.003   # +0.30 pp/yr  (AI services)
+        "Health care and social assistance": 0.0015  # +0.15 pp/yr  (AI-enhanced care)
+        "Finance and insurance": 0.001      # +0.10 pp/yr
+        "Manufacturing": -0.002             # -0.20 pp/yr  (AI automation accelerates decline)
+        "Retail trade": -0.0015             # -0.15 pp/yr  (AI-driven consolidation)
+        "Mining, quarrying, and oil and gas extraction": -0.001  # -0.10 pp/yr
+        "Agriculture, forestry, fishing and hunting": -0.0005  # -0.05 pp/yr
+        "Utilities": -0.0003               # -0.03 pp/yr
+        "Administrative and support and waste management and remediation services": -0.001  # -0.10 pp/yr  (AI replaces back-office)

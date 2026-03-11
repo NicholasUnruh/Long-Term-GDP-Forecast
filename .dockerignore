@@ -1,0 +1,10 @@
+node_modules
+web/node_modules
+web/.next
+outputs
+__pycache__
+*.pyc
+.git
+.env
+*.md
+!requirements*.txt
