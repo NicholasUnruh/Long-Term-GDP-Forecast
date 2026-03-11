@@ -51,8 +51,14 @@ export const getCAGRByIndustry = (jobId: string, state: string = 'United States'
 export const getStackedGDPPerCapita = (jobId: string, state: string) =>
   fetchAPI<StackedChartData>(`/forecast/results/${jobId}/charts/stacked-gdp-per-capita?state=${encodeURIComponent(state)}`);
 
-export const getGDPTrends = (jobId: string, state: string, industries: string[]) =>
-  fetchAPI<GDPTrendsData>(`/forecast/results/${jobId}/charts/gdp-trends?state=${encodeURIComponent(state)}&industries=${industries.map(i => encodeURIComponent(i)).join(',')}`);
+export const getGDPTrends = (jobId: string, state: string, industries: string[]) => {
+  const params = new URLSearchParams();
+  params.set('state', state);
+  for (const ind of industries) {
+    params.append('industries', ind);
+  }
+  return fetchAPI<GDPTrendsData>(`/forecast/results/${jobId}/charts/gdp-trends?${params}`);
+};
 
 export const getGDPTable = (jobId: string, params: { state?: string; industry?: string; page?: number; per_page?: number }) => {
   const searchParams = new URLSearchParams();

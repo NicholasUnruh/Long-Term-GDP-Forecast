@@ -202,13 +202,13 @@ async def get_stacked_chart(
 async def get_gdp_trends(
     job_id: str,
     state: str = Query(default="United States", description="State name"),
-    industries: Optional[str] = Query(
-        default=None,
-        description="Comma-separated list of industry names",
+    industries: list[str] = Query(
+        default=[],
+        description="Industry names (repeat param for multiple)",
     ),
 ):
     results = _get_results(job_id)
-    ind_list = [i.strip() for i in industries.split(",")] if industries else None
+    ind_list = industries if industries else None
     data = build_gdp_trends_data(results["gdp_forecast"], state=state, industries=ind_list)
     return data
 
