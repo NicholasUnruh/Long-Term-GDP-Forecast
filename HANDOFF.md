@@ -1,7 +1,7 @@
 # Claude Handoff — GDP Forecast Website Implementation
 
-**Date**: March 11, 2026 (updated Session 6)
-**Status**: Export CSV overhauled, per-capita chart tooltip improved, scenarios recalibrated
+**Date**: March 11, 2026 (updated Session 7)
+**Status**: Deployed to Railway, dark mode added, Docker Compose working locally
 
 ---
 
@@ -225,11 +225,39 @@ GET    /data/industries                                 # Leaf, sub-aggregate, a
 ### Remaining Items
 - **Run Forecast from Configure**: Full end-to-end flow (configure → run → dashboard redirect) needs re-testing after scenario recalibration.
 - **Mobile responsiveness**: Not yet tested on mobile viewports.
-- **Dark mode**: Not implemented. Tailwind + shadcn support it but no toggle was added.
 
-### Production Readiness
-- **Docker Compose**: Not yet created.
-- **Nginx reverse proxy**: Not configured (frontend calls API directly on port 8000).
+## Resolved Issues (Session 7 — March 11, 2026)
+
+### Dark Mode
+- Wired up `next-themes` ThemeProvider in `web/components/providers.tsx`
+- Created `web/components/layout/theme-toggle.tsx` (Sun/Moon icon button)
+- Added to navigation bar (right-aligned via `ml-auto`)
+- `suppressHydrationWarning` added to `<html>` tag in `layout.tsx`
+- Dark mode CSS variables already existed in `globals.css` (shadcn default)
+
+### Docker Compose (Local Development)
+- `Dockerfile.api` — Python 3.11-slim, copies src + data + config, runs uvicorn on 8000
+- `Dockerfile.web` — Multi-stage Node 20 Alpine (deps → build → standalone runner) on 3000
+- `docker-compose.yml` — 3 services: api, web, nginx (exposed on port 80)
+- `nginx/nginx.conf` — Reverse proxy: `/forecast/`, `/config/`, `/data/` → api; everything else → web
+- `.dockerignore` — Excludes node_modules, .next, outputs, __pycache__, .git
+- Tested and verified: all 3 containers healthy, baseline precompute completes, frontend loads
+
+### Railway Deployment (Production)
+- **GitHub repo**: https://github.com/NicholasUnruh/Long-Term-GDP-Forecast (master branch)
+- **2 Railway services** from same repo:
+  - `api` — uses `Dockerfile.api`, private (no public domain), port 8000
+  - `web` — uses `Dockerfile.web`, public domain on port 3000
+- **No nginx on Railway** — Next.js rewrites in `next.config.ts` proxy API paths to internal network
+- **Internal networking**: `API_INTERNAL_URL=http://api.railway.internal:8000` (Railway private DNS)
+- **Build args**: `NEXT_PUBLIC_API_URL=""` (empty string → relative URLs, proxied through rewrites)
+- `railway-api.toml` / `railway-web.toml` — config-as-code for Railway builds
+- **Deploy workflow**: `git push` to master → Railway auto-deploys both services
+
+### Code Changes for Deployment
+- `next.config.ts` — Added `output: "standalone"` + rewrites for `/forecast/`, `/config/`, `/data/` using `API_INTERNAL_URL` env var
+- `api/config.py` — CORS_ORIGINS now configurable via `CORS_ORIGINS` env var (comma-separated)
+- `web/lib/api-client.ts` + `web/app/dashboard/page.tsx` — Changed `||` to `??` for `NEXT_PUBLIC_API_URL` so empty string works (relative URLs for production)
 
 ## Type Issues Fixed During Build
 
@@ -251,7 +279,7 @@ These were already fixed in the codebase.
 
 4. **ECharts over Recharts**: Canvas renderer handles 23 stacked series without SVG performance issues. Tree-shaken from 800KB to ~300KB.
 
-5. **No Next.js API route proxy**: Frontend calls FastAPI directly on port 8000. CORS is configured. For production, add Nginx reverse proxy.
+5. **Next.js rewrites as API proxy**: In production (Railway), Next.js rewrites in `next.config.ts` proxy `/forecast/`, `/config/`, `/data/` to the API over Railway's private network. No CORS needed. Locally, the rewrites point to `http://localhost:8000`. Docker Compose uses nginx instead.
 
 ## Dependencies
 
