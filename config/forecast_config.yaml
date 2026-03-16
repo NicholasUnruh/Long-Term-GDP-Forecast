@@ -38,6 +38,14 @@ forecast:
   # Range: 2005 - 2024
   historical_range_start_year: null
 
+  # Short-term CAGR: use a more recent historical window for the first N years,
+  # then transition to the long-term rate. This lets you weight recent trends
+  # (e.g. tech boom) more heavily in the near term while reverting to a
+  # longer-run average afterward.
+  # Set short_term_years to 0 to disable (use long-term rate for entire forecast).
+  short_term_years: 0              # Years to apply the short-term rate (0 = disabled)
+  short_term_start_year: 2015      # Historical range start for the short-term CAGR
+
   # Maximum annual CAGR (absolute value) allowed per state-industry pair.
   # Caps extreme growth rates to prevent unrealistic compounding over 25+ years.
   # Without a cap, outliers like CA Information (8.7%) or ND Mining (15.4%) produce

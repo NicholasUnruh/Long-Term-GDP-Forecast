@@ -91,6 +91,8 @@ function getDefaultConfig(): ForecastConfig {
       start_quarter: '2025:Q4',
       end_year: 2050,
       historical_range_start_year: null,
+      short_term_years: 0,
+      short_term_start_year: 2015,
       cagr_cap: 0,
       cagr_overrides: {},
     },
@@ -374,27 +376,24 @@ export default function ConfigurePage() {
         request.scenario = selectedScenario;
       }
 
-      // Forecast section (end year + historical range + cagr cap + overrides)
+      // Forecast section — always send all forecast params if any changed
       const hasOverrides = Object.keys(config.forecast.cagr_overrides).length > 0;
       const fcChanged =
         config.forecast.end_year !== defaults.forecast.end_year ||
         config.forecast.historical_range_start_year !== defaults.forecast.historical_range_start_year ||
+        config.forecast.short_term_years !== defaults.forecast.short_term_years ||
+        config.forecast.short_term_start_year !== defaults.forecast.short_term_start_year ||
         Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10 ||
         hasOverrides;
       if (fcChanged) {
-        request.forecast = {};
-        if (config.forecast.end_year !== defaults.forecast.end_year) {
-          request.forecast.end_year = config.forecast.end_year;
-        }
-        if (config.forecast.historical_range_start_year !== defaults.forecast.historical_range_start_year) {
-          request.forecast.historical_range_start_year = config.forecast.historical_range_start_year;
-        }
-        if (Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10) {
-          request.forecast.cagr_cap = config.forecast.cagr_cap;
-        }
-        if (hasOverrides) {
-          request.forecast.cagr_overrides = config.forecast.cagr_overrides;
-        }
+        request.forecast = {
+          end_year: config.forecast.end_year,
+          historical_range_start_year: config.forecast.historical_range_start_year,
+          short_term_years: config.forecast.short_term_years,
+          short_term_start_year: config.forecast.short_term_start_year,
+          cagr_cap: config.forecast.cagr_cap,
+          ...(hasOverrides ? { cagr_overrides: config.forecast.cagr_overrides } : {}),
+        };
       }
 
       // Population
@@ -472,6 +471,10 @@ export default function ConfigurePage() {
     ? `${config.forecast.historical_range_start_year} - 2025`
     : 'All available (2005 - 2025)';
 
+  const forecastBadgeLabel = config.forecast.short_term_years > 0
+    ? `${config.forecast.short_term_start_year}+ (${config.forecast.short_term_years}yr) → ${historicalRangeLabel}`
+    : historicalRangeLabel;
+
   // ── Loading state ────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -530,7 +533,7 @@ export default function ConfigurePage() {
           <AccordionTrigger className="text-base px-1">
             <div className="flex items-center gap-2">
               <span>Forecast Horizon & Historical Range</span>
-              <Badge variant="secondary">{historicalRangeLabel}</Badge>
+              <Badge variant="secondary">{forecastBadgeLabel}</Badge>
             </div>
           </AccordionTrigger>
           <AccordionContent className="px-1">
@@ -553,8 +556,8 @@ export default function ConfigurePage() {
               />
               <Separator />
               <SliderWithInput
-                label="Historical Data Start Year"
-                description="Start year for computing historical CAGR per state-industry. GDP growth rates are extrapolated from this range. Use a more recent start year to capture current trends, or an earlier year to smooth out volatility. Set to 2005 to use all available data."
+                label="Long-Term CAGR Start Year"
+                description="Start year for computing the long-term historical CAGR per state-industry. This rate applies after the short-term period ends (or for the entire forecast if short-term is disabled). Set to 2005 to use all available data."
                 value={config.forecast.historical_range_start_year ?? 2005}
                 onChange={(v) => {
                   const year = Math.round(v);
@@ -564,6 +567,59 @@ export default function ConfigurePage() {
                 max={2024}
                 step={1}
               />
+              <Separator />
+
+              {/* ── Short-Term CAGR ──────────────────────────────────── */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-semibold">Short-Term Growth Rate</Label>
+                  <Badge variant={config.forecast.short_term_years > 0 ? 'default' : 'secondary'}>
+                    {config.forecast.short_term_years > 0
+                      ? `${config.forecast.short_term_years}yr @ ${config.forecast.short_term_start_year}+`
+                      : 'Disabled'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Use a more recent historical window for the first N years of the forecast to weight current trends more heavily, then transition to the long-term rate. Set years to 0 to disable.
+                </p>
+                <SliderWithInput
+                  label="Short-Term Duration (Years)"
+                  description="Number of years to apply the short-term CAGR before switching to the long-term rate. Set to 0 to use only the long-term rate."
+                  value={config.forecast.short_term_years}
+                  onChange={(v) => updateForecast('short_term_years', Math.round(v))}
+                  min={0}
+                  max={15}
+                  step={1}
+                />
+                {config.forecast.short_term_years > 0 && (
+                  <SliderWithInput
+                    label="Short-Term CAGR Start Year"
+                    description="Historical range start for computing the short-term growth rate. Use a recent year (e.g. 2018-2020) to capture current momentum."
+                    value={config.forecast.short_term_start_year}
+                    onChange={(v) => updateForecast('short_term_start_year', Math.round(v))}
+                    min={2005}
+                    max={2024}
+                    step={1}
+                  />
+                )}
+                {config.forecast.short_term_years > 0 && (
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-sm space-y-1">
+                    <div>
+                      <span className="text-muted-foreground">Short-term: </span>
+                      <span className="font-mono font-medium">{config.forecast.short_term_start_year}-2025</span>
+                      <span className="text-muted-foreground"> for first </span>
+                      <span className="font-mono font-medium">{config.forecast.short_term_years} years</span>
+                      <span className="text-muted-foreground"> ({config.forecast.short_term_years * 4} quarters)</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Long-term: </span>
+                      <span className="font-mono font-medium">{config.forecast.historical_range_start_year ?? 2005}-2025</span>
+                      <span className="text-muted-foreground"> for remaining </span>
+                      <span className="font-mono font-medium">{config.forecast.end_year - 2025 - config.forecast.short_term_years} years</span>
+                    </div>
+                  </div>
+                )}
+              </div>
               <Separator />
 
               {/* ── CAGR Preview Table ───────────────────────────────── */}

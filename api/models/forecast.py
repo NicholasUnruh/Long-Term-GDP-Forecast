@@ -22,6 +22,18 @@ class ForecastHorizon(BaseModel):
         le=2024,
         description="Start year for historical CAGR computation. null = use all available data (2005+).",
     )
+    short_term_years: int = Field(
+        default=0,
+        ge=0,
+        le=15,
+        description="Years to apply the short-term CAGR before switching to long-term. 0 = disabled.",
+    )
+    short_term_start_year: Optional[int] = Field(
+        default=2015,
+        ge=2005,
+        le=2024,
+        description="Historical range start for short-term CAGR computation.",
+    )
     cagr_cap: Optional[float] = Field(
         default=0,
         ge=0.0,

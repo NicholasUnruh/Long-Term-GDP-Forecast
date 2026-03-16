@@ -73,6 +73,8 @@ export interface ForecastConfig {
     start_quarter: string;
     end_year: number;
     historical_range_start_year: number | null;
+    short_term_years: number;
+    short_term_start_year: number;
     cagr_cap: number;
     cagr_overrides: Record<string, number>;
   };

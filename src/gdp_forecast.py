@@ -60,25 +60,48 @@ def get_base_gdp(gdp_df, state, industry):
 
 
 def forecast_state_industry(gdp_df, pop_forecast_df, config, state, industry, end_year):
-    """Forecast a single state-industry pair using historical CAGR extrapolation."""
+    """Forecast a single state-industry pair using historical CAGR extrapolation.
+
+    Supports a two-phase growth model:
+      - Short-term: uses a CAGR computed from a recent historical window
+        (short_term_start_year), applied for short_term_years.
+      - Long-term: uses the CAGR from the full historical_range_start_year
+        for the remaining forecast horizon.
+    If short_term_years is 0 or short_term_start_year is not set, the entire
+    forecast uses the long-term rate.
+    """
     base_gdp, last_quarter = get_base_gdp(gdp_df, state, industry)
     if np.isnan(base_gdp) or last_quarter is None:
         return pd.DataFrame()
 
-    # Get the historical range start year from config (None = use all data)
-    hist_start = config.get("forecast", {}).get("historical_range_start_year", None)
-    cagr_cap = config.get("forecast", {}).get("cagr_cap", 0)  # default 0 = no cap
+    fc_cfg = config.get("forecast", {})
 
-    # Check for per-pair override (takes precedence over global cap)
-    cagr_overrides = config.get("forecast", {}).get("cagr_overrides", {})
+    # Cap logic
+    cagr_cap = fc_cfg.get("cagr_cap", 0)
+    cagr_overrides = fc_cfg.get("cagr_overrides", {})
     pair_key = f"{state}|{industry}"
     pair_cap = cagr_overrides.get(pair_key)
-
     effective_cap = pair_cap if pair_cap is not None else (cagr_cap if cagr_cap else None)
 
-    _, growth_q = compute_historical_cagr(gdp_df, state, industry, start_year=hist_start, cagr_cap=effective_cap)
+    # Long-term CAGR (full range)
+    hist_start = fc_cfg.get("historical_range_start_year", None)
+    _, lt_growth_q = compute_historical_cagr(
+        gdp_df, state, industry, start_year=hist_start, cagr_cap=effective_cap
+    )
 
-    forecast_start_q = config["forecast"]["start_quarter"]
+    # Short-term CAGR (recent window)
+    st_years = fc_cfg.get("short_term_years", 0)
+    st_start = fc_cfg.get("short_term_start_year", None)
+    if st_years > 0 and st_start is not None:
+        _, st_growth_q = compute_historical_cagr(
+            gdp_df, state, industry, start_year=st_start, cagr_cap=effective_cap
+        )
+        st_quarters = st_years * 4  # number of quarters in short-term phase
+    else:
+        st_growth_q = lt_growth_q
+        st_quarters = 0
+
+    forecast_start_q = fc_cfg["start_quarter"]
     quarters = generate_quarter_range(forecast_start_q, end_year)
 
     # Handle gap between last data point and forecast start
@@ -86,11 +109,15 @@ def forecast_state_industry(gdp_df, pop_forecast_df, config, state, industry, en
     gap_quarters = generate_quarter_range(data_end, int(forecast_start_q.split(":")[0]))
     gap_quarters = [q for q in gap_quarters if q < forecast_start_q]
     n_gap = len(gap_quarters)
-    projected_base = base_gdp * (1 + growth_q) ** (n_gap + 1) if n_gap > 0 else base_gdp * (1 + growth_q)
+    # Use short-term rate for the gap projection if short-term is active
+    gap_rate = st_growth_q if st_quarters > 0 else lt_growth_q
+    projected_base = base_gdp * (1 + gap_rate) ** (n_gap + 1) if n_gap > 0 else base_gdp * (1 + gap_rate)
 
     gdp_values = [projected_base]
-    for _ in quarters[1:]:
-        gdp_values.append(gdp_values[-1] * (1 + growth_q))
+    for idx in range(1, len(quarters)):
+        # Use short-term rate for the first st_quarters, then long-term
+        rate = st_growth_q if idx < st_quarters else lt_growth_q
+        gdp_values.append(gdp_values[-1] * (1 + rate))
 
     records = []
     for q, val in zip(quarters, gdp_values):
