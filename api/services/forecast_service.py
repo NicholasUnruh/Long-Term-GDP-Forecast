@@ -30,6 +30,7 @@ from src.utils import (
     SUB_AGGREGATE_INDUSTRIES,
     AGGREGATE_INDUSTRIES,
 )
+from src.gdp_forecast import compute_historical_cagr
 from src.data_loader import (
     load_gdp_data,
     load_population_data,
@@ -66,20 +67,14 @@ def _request_to_overrides(request_dict: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     for section in (
         "forecast",
-        "production_function",
-        "tfp",
-        "capital",
-        "labor",
         "population",
         "industry",
     ):
         val = request_dict.get(section)
         if val is not None:
-            # Convert nested Pydantic models (CapitalByIndustry) to plain dicts
             cleaned: dict[str, Any] = {}
             for k, v in val.items():
                 if isinstance(v, dict):
-                    # by_industry values might be CapitalByIndustry dicts
                     cleaned[k] = {
                         ik: iv for ik, iv in v.items() if iv is not None
                     } if all(isinstance(iv, dict) for iv in v.values()) else v

@@ -27,8 +27,9 @@ import {
 } from '@/components/ui/tooltip';
 import { SliderWithInput } from '@/components/configure/slider-with-input';
 import { LEAF_INDUSTRIES, INDUSTRY_SHORT_NAMES, SCENARIOS, SCENARIO_LABELS } from '@/lib/constants';
-import { formatPercent } from '@/lib/formatters';
-import { getDefaults, getScenarios, runForecast, getJobStatus } from '@/lib/api-client';
+import { formatPercent, formatGDP } from '@/lib/formatters';
+import { getDefaults, getScenarios, runForecast, getJobStatus, getCAGRPreview } from '@/lib/api-client';
+import type { CAGRPreviewRow } from '@/lib/api-client';
 import type { ForecastConfig, ForecastRequest } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
@@ -89,28 +90,8 @@ function getDefaultConfig(): ForecastConfig {
     forecast: {
       start_quarter: '2025:Q4',
       end_year: 2050,
-    },
-    production_function: {
-      alpha: 0.30,
-      depreciation_rate: 0.05,
-    },
-    tfp: {
-      national_growth_rate: 0.012,
-      by_industry: {},
-      by_state: {},
-      convergence_rate: 0.02,
-    },
-    capital: {
-      investment_to_gdp_ratio: 0.21,
-      capital_output_ratio: 3.0,
-      capex_growth_adjustment: 0.002,
-      by_industry: {},
-    },
-    labor: {
-      lfpr_trend: -0.0014,
-      working_age_share_trend: -0.002,
-      natural_unemployment_rate: 0.04,
-      hours_growth: -0.001,
+      historical_range_start_year: null,
+      cagr_cap: 0,
     },
     population: {
       fit_start_year: 2010,
@@ -135,7 +116,6 @@ function countModified(current: any, defaults: any, prefix = ''): number {
   }
   if (typeof current !== 'object' || current === null) {
     if (typeof defaults !== 'object' || defaults === null) {
-      // Compare scalar values
       if (typeof current === 'number' && typeof defaults === 'number') {
         if (Math.abs(current - defaults) > 1e-10) count++;
       } else if (current !== defaults) {
@@ -144,7 +124,6 @@ function countModified(current: any, defaults: any, prefix = ''): number {
     }
     return count;
   }
-  // Both are objects
   const allKeys = new Set([...Object.keys(current || {}), ...Object.keys(defaults || {})]);
   for (const key of allKeys) {
     count += countModified(
@@ -187,16 +166,6 @@ function CollapsibleSection({
   );
 }
 
-// ─── Computed Value Display ──────────────────────────────────────────────────
-function ComputedValue({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono font-medium">{value}</span>
-    </div>
-  );
-}
-
 // ─── Percent Input (for inline fields that store raw decimals) ──────────────
 function PercentInput({
   value,
@@ -205,10 +174,10 @@ function PercentInput({
   decimals = 1,
   className,
 }: {
-  value: number;       // raw decimal (e.g. 0.022 = 2.2%)
+  value: number;
   onChange: (rawValue: number) => void;
-  step?: number;       // in percent units (e.g. 0.1 = 0.1%)
-  decimals?: number;   // decimal places for % display
+  step?: number;
+  decimals?: number;
   className?: string;
 }) {
   return (
@@ -247,9 +216,12 @@ export default function ConfigurePage() {
   const [jobError, setJobError] = React.useState<string | null>(null);
 
   // State override management
-  const [newTfpState, setNewTfpState] = React.useState('');
   const [newPopState, setNewPopState] = React.useState('');
 
+  // CAGR preview
+  const [cagrPreview, setCagrPreview] = React.useState<CAGRPreviewRow[]>([]);
+  const [cagrLoading, setCagrLoading] = React.useState(false);
+  const [cagrShowAll, setCagrShowAll] = React.useState(false);
 
   // ── Fetch defaults & scenarios on mount ──────────────────────────────────
   React.useEffect(() => {
@@ -260,13 +232,11 @@ export default function ConfigurePage() {
           getScenarios(),
         ]);
 
-        // Merge API defaults with our fallback structure
         const mergedDefaults = deepMerge(getDefaultConfig(), defaultsData) as ForecastConfig;
         setDefaults(mergedDefaults);
         setConfig(deepClone(mergedDefaults));
         setScenariosData(scenariosResp);
       } catch {
-        // If API is not available, use fallback defaults
         console.warn('Could not fetch defaults from API, using fallback defaults');
       } finally {
         setLoading(false);
@@ -275,56 +245,35 @@ export default function ConfigurePage() {
     load();
   }, []);
 
-  // ── Computed values ──────────────────────────────────────────────────────
-  const impliedCapitalGrowth = React.useMemo(() => {
-    const { investment_to_gdp_ratio, capital_output_ratio, capex_growth_adjustment } = config.capital;
-    const { depreciation_rate } = config.production_function;
-    return (investment_to_gdp_ratio / capital_output_ratio) - depreciation_rate + capex_growth_adjustment;
-  }, [config.capital, config.production_function]);
-
-  const impliedLaborGrowth = React.useMemo(() => {
-    const { lfpr_trend, working_age_share_trend, hours_growth } = config.labor;
-    return lfpr_trend + working_age_share_trend + hours_growth;
-  }, [config.labor]);
-
   const modifiedCount = React.useMemo(
     () => countModified(config, defaults),
     [config, defaults]
   );
+
+  // ── Fetch CAGR preview when historical range changes ─────────────────────
+  React.useEffect(() => {
+    if (loading) return;
+    let cancelled = false;
+    setCagrLoading(true);
+    const startYear = config.forecast.historical_range_start_year;
+    getCAGRPreview(startYear)
+      .then((rows) => {
+        if (!cancelled) setCagrPreview(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCagrPreview([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCagrLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [config.forecast.historical_range_start_year, loading]);
 
   // ── Updater helpers ──────────────────────────────────────────────────────
   function updateForecast(field: keyof ForecastConfig['forecast'], value: any) {
     setConfig(prev => ({
       ...prev,
       forecast: { ...prev.forecast, [field]: value },
-    }));
-  }
-
-  function updateProdFn(field: keyof ForecastConfig['production_function'], value: number) {
-    setConfig(prev => ({
-      ...prev,
-      production_function: { ...prev.production_function, [field]: value },
-    }));
-  }
-
-  function updateTfp(field: keyof ForecastConfig['tfp'], value: any) {
-    setConfig(prev => ({
-      ...prev,
-      tfp: { ...prev.tfp, [field]: value },
-    }));
-  }
-
-  function updateCapital(field: keyof ForecastConfig['capital'], value: any) {
-    setConfig(prev => ({
-      ...prev,
-      capital: { ...prev.capital, [field]: value },
-    }));
-  }
-
-  function updateLabor(field: keyof ForecastConfig['labor'], value: number) {
-    setConfig(prev => ({
-      ...prev,
-      labor: { ...prev.labor, [field]: value },
     }));
   }
 
@@ -340,68 +289,6 @@ export default function ConfigurePage() {
       ...prev,
       industry: { ...prev.industry, [field]: value },
     }));
-  }
-
-  // ── TFP industry override helpers ────────────────────────────────────────
-  function setTfpIndustryOverride(industry: string, value: number) {
-    setConfig(prev => ({
-      ...prev,
-      tfp: {
-        ...prev.tfp,
-        by_industry: { ...prev.tfp.by_industry, [industry]: value },
-      },
-    }));
-  }
-
-  function removeTfpIndustryOverride(industry: string) {
-    setConfig(prev => {
-      const byIndustry = { ...prev.tfp.by_industry };
-      delete byIndustry[industry];
-      return { ...prev, tfp: { ...prev.tfp, by_industry: byIndustry } };
-    });
-  }
-
-  // ── TFP state override helpers ───────────────────────────────────────────
-  function setTfpStateOverride(state: string, value: number) {
-    setConfig(prev => ({
-      ...prev,
-      tfp: {
-        ...prev.tfp,
-        by_state: { ...prev.tfp.by_state, [state]: value },
-      },
-    }));
-  }
-
-  function removeTfpStateOverride(state: string) {
-    setConfig(prev => {
-      const byState = { ...prev.tfp.by_state };
-      delete byState[state];
-      return { ...prev, tfp: { ...prev.tfp, by_state: byState } };
-    });
-  }
-
-  // ── Capital industry override helpers ────────────────────────────────────
-  function setCapitalIndustryOverride(
-    industry: string,
-    field: 'investment_ratio' | 'alpha',
-    value: number
-  ) {
-    setConfig(prev => {
-      const existing = prev.capital.by_industry[industry] || {
-        investment_ratio: config.capital.investment_to_gdp_ratio,
-        alpha: config.production_function.alpha,
-      };
-      return {
-        ...prev,
-        capital: {
-          ...prev.capital,
-          by_industry: {
-            ...prev.capital.by_industry,
-            [industry]: { ...existing, [field]: value },
-          },
-        },
-      };
-    });
   }
 
   // ── Population state override helpers ────────────────────────────────────
@@ -459,64 +346,28 @@ export default function ConfigurePage() {
     setJobId(null);
 
     try {
-      // Build the request: only include overrides from defaults
       const request: ForecastRequest = {};
 
       if (selectedScenario !== 'baseline') {
         request.scenario = selectedScenario;
       }
 
-      // Always send the full config as overrides so the API gets exact values
-      if (config.forecast.end_year !== defaults.forecast.end_year) {
-        request.forecast = { end_year: config.forecast.end_year };
-      }
-
-      const pf = config.production_function;
-      const pfD = defaults.production_function;
-      if (pf.alpha !== pfD.alpha || pf.depreciation_rate !== pfD.depreciation_rate) {
-        request.production_function = {};
-        if (pf.alpha !== pfD.alpha) request.production_function.alpha = pf.alpha;
-        if (pf.depreciation_rate !== pfD.depreciation_rate) request.production_function.depreciation_rate = pf.depreciation_rate;
-      }
-
-      // TFP
-      const tfpChanged =
-        config.tfp.national_growth_rate !== defaults.tfp.national_growth_rate ||
-        config.tfp.convergence_rate !== defaults.tfp.convergence_rate ||
-        JSON.stringify(config.tfp.by_industry) !== JSON.stringify(defaults.tfp.by_industry) ||
-        JSON.stringify(config.tfp.by_state) !== JSON.stringify(defaults.tfp.by_state);
-      if (tfpChanged) {
-        request.tfp = {
-          national_growth_rate: config.tfp.national_growth_rate,
-          convergence_rate: config.tfp.convergence_rate,
-          by_industry: config.tfp.by_industry,
-          by_state: config.tfp.by_state,
-        };
-      }
-
-      // Capital
-      const capChanged =
-        config.capital.investment_to_gdp_ratio !== defaults.capital.investment_to_gdp_ratio ||
-        config.capital.capital_output_ratio !== defaults.capital.capital_output_ratio ||
-        config.capital.capex_growth_adjustment !== defaults.capital.capex_growth_adjustment ||
-        JSON.stringify(config.capital.by_industry) !== JSON.stringify(defaults.capital.by_industry);
-      if (capChanged) {
-        request.capital = {
-          investment_to_gdp_ratio: config.capital.investment_to_gdp_ratio,
-          capital_output_ratio: config.capital.capital_output_ratio,
-          capex_growth_adjustment: config.capital.capex_growth_adjustment,
-          by_industry: config.capital.by_industry,
-        };
-      }
-
-      // Labor
-      const labChanged =
-        config.labor.lfpr_trend !== defaults.labor.lfpr_trend ||
-        config.labor.working_age_share_trend !== defaults.labor.working_age_share_trend ||
-        config.labor.natural_unemployment_rate !== defaults.labor.natural_unemployment_rate ||
-        config.labor.hours_growth !== defaults.labor.hours_growth;
-      if (labChanged) {
-        request.labor = { ...config.labor };
+      // Forecast section (end year + historical range + cagr cap)
+      const fcChanged =
+        config.forecast.end_year !== defaults.forecast.end_year ||
+        config.forecast.historical_range_start_year !== defaults.forecast.historical_range_start_year ||
+        Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10;
+      if (fcChanged) {
+        request.forecast = {};
+        if (config.forecast.end_year !== defaults.forecast.end_year) {
+          request.forecast.end_year = config.forecast.end_year;
+        }
+        if (config.forecast.historical_range_start_year !== defaults.forecast.historical_range_start_year) {
+          request.forecast.historical_range_start_year = config.forecast.historical_range_start_year;
+        }
+        if (Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10) {
+          request.forecast.cagr_cap = config.forecast.cagr_cap;
+        }
       }
 
       // Population
@@ -557,7 +408,6 @@ export default function ConfigurePage() {
           const status = await getJobStatus(result.job_id);
           setJobStatusState(status.status);
           if (status.status === 'completed') {
-            // Brief delay so user sees the "completed" state
             setTimeout(() => {
               setRunDialogOpen(false);
               router.push(`/dashboard?job_id=${result.job_id}`);
@@ -565,7 +415,6 @@ export default function ConfigurePage() {
           } else if (status.status === 'failed') {
             setJobError(status.error || 'Forecast failed');
           } else {
-            // Still running, poll again
             setTimeout(poll, 2000);
           }
         } catch (err) {
@@ -581,26 +430,20 @@ export default function ConfigurePage() {
     }
   }
 
-  // ── Default industry TFP rates from config YAML ─────────────────────────
-  const defaultIndustryTfp: Record<string, number> = React.useMemo(() => {
-    // Merge defaults.tfp.by_industry with config.tfp.by_industry
-    const map: Record<string, number> = {};
-    for (const ind of LEAF_INDUSTRIES) {
-      map[ind] = defaults.tfp.by_industry[ind] ?? defaults.tfp.national_growth_rate;
-    }
-    return map;
-  }, [defaults]);
-
   // ── Default shift rates ─────────────────────────────────────────────────
   const defaultShiftRates: Record<string, number> = React.useMemo(() => {
     return defaults.industry.shift_rates || {};
   }, [defaults]);
 
-  // Industries with nonzero default shift rates
   const shiftIndustries = React.useMemo(() => {
     const rates = { ...defaultShiftRates, ...config.industry.shift_rates };
     return LEAF_INDUSTRIES.filter(ind => (rates[ind] ?? 0) !== 0 || ind in config.industry.shift_rates);
   }, [defaultShiftRates, config.industry.shift_rates]);
+
+  // ── Historical range display ─────────────────────────────────────────────
+  const historicalRangeLabel = config.forecast.historical_range_start_year
+    ? `${config.forecast.historical_range_start_year} - 2025`
+    : 'All available (2005 - 2025)';
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loading) {
@@ -629,8 +472,8 @@ export default function ConfigurePage() {
           <h1 className="text-2xl font-bold tracking-tight">Configure Forecast Parameters</h1>
         </div>
         <p className="text-muted-foreground">
-          Adjust the Cobb-Douglas production function parameters to customize your GDP forecast.
-          Select a scenario preset or fine-tune individual parameters.
+          GDP growth is projected by extrapolating historical CAGR (compound annual growth rate) for each state-industry pair.
+          Adjust the historical data range, population assumptions, and industry shifts below.
         </p>
       </div>
 
@@ -655,16 +498,16 @@ export default function ConfigurePage() {
 
       {/* ── Accordion Sections ──────────────────────────────────────────── */}
       <Accordion defaultValue={[1, 2, 3]}>
-        {/* ━━ Section 1: Forecast Horizon ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+        {/* ━━ Section 1: Forecast Horizon & Historical Range ━━━━━━━━━━━━ */}
         <AccordionItem value={1}>
           <AccordionTrigger className="text-base px-1">
             <div className="flex items-center gap-2">
-              <span>Forecast Horizon</span>
-              <Badge variant="secondary">{config.forecast.start_quarter} - {config.forecast.end_year}</Badge>
+              <span>Forecast Horizon & Historical Range</span>
+              <Badge variant="secondary">{historicalRangeLabel}</Badge>
             </div>
           </AccordionTrigger>
           <AccordionContent className="px-1">
-            <div className="space-y-4 pt-2">
+            <div className="space-y-5 pt-2">
               <div className="flex items-center gap-2">
                 <Label className="text-sm font-medium w-28">Start Quarter</Label>
                 <span className="text-sm font-mono bg-muted px-2 py-1 rounded">
@@ -681,335 +524,154 @@ export default function ConfigurePage() {
                 max={2100}
                 step={1}
               />
-            </div>
-          </AccordionContent>
-        </AccordionItem>
-
-        {/* ━━ Section 2: Production Function ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <AccordionItem value={2}>
-          <AccordionTrigger className="text-base px-1">
-            <div className="flex items-center gap-2">
-              <span>Production Function</span>
-              <Badge variant="secondary">alpha = {(config.production_function.alpha * 100).toFixed(0)}%</Badge>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-1">
-            <div className="space-y-5 pt-2">
+              <Separator />
               <SliderWithInput
-                label="Alpha (Capital Share)"
-                description="Capital's share of output in the Cobb-Douglas function. CBO uses 30%. Higher values make investment more important; lower values make labor more important."
-                value={config.production_function.alpha}
-                onChange={(v) => updateProdFn('alpha', v)}
-                min={0.10}
-                max={0.60}
-                step={0.01}
-                displayAsPercent
+                label="Historical Data Start Year"
+                description="Start year for computing historical CAGR per state-industry. GDP growth rates are extrapolated from this range. Use a more recent start year to capture current trends, or an earlier year to smooth out volatility. Set to 2005 to use all available data."
+                value={config.forecast.historical_range_start_year ?? 2005}
+                onChange={(v) => {
+                  const year = Math.round(v);
+                  updateForecast('historical_range_start_year', year <= 2005 ? null : year);
+                }}
+                min={2005}
+                max={2024}
+                step={1}
               />
+              <Separator />
+
+              {/* ── CAGR Preview Table ───────────────────────────────── */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm font-medium">Growth Rate Preview</Label>
+                    <Tooltip>
+                      <TooltipTrigger className="inline-flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground transition-colors">
+                        <Info className="h-3.5 w-3.5" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        Historical CAGR for each state-industry pair, sorted by magnitude. Review for outliers before running the forecast. Optionally set a cap below to limit extreme values.
+                      </TooltipContent>
+                    </Tooltip>
+                    {cagrLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+                  {cagrPreview.length > 0 && (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {cagrPreview.length} pairs | Range: {historicalRangeLabel}
+                    </span>
+                  )}
+                </div>
+
+                {cagrPreview.length > 0 && (
+                  <div className="rounded-lg border overflow-hidden">
+                    <div className="max-h-80 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                          <tr className="text-xs text-muted-foreground">
+                            <th className="text-left px-3 py-2 font-medium">#</th>
+                            <th className="text-left px-3 py-2 font-medium">State</th>
+                            <th className="text-left px-3 py-2 font-medium">Industry</th>
+                            <th className="text-right px-3 py-2 font-medium">CAGR</th>
+                            <th className="text-right px-3 py-2 font-medium">Base GDP</th>
+                            <th className="text-right px-3 py-2 font-medium">25yr &times;</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(cagrShowAll ? cagrPreview : cagrPreview.slice(0, 30)).map((row, i) => {
+                            const multiplier = Math.pow(1 + row.annual_cagr, 25);
+                            const isCapped = config.forecast.cagr_cap > 0 && Math.abs(row.annual_cagr) > config.forecast.cagr_cap;
+                            const isHigh = Math.abs(row.annual_cagr) > 0.05;
+                            return (
+                              <tr
+                                key={`${row.state}-${row.industry}`}
+                                className={cn(
+                                  'border-t transition-colors',
+                                  isCapped && 'bg-yellow-50 dark:bg-yellow-950/20',
+                                  isHigh && !isCapped && 'bg-red-50/50 dark:bg-red-950/10'
+                                )}
+                              >
+                                <td className="px-3 py-1.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
+                                <td className="px-3 py-1.5 truncate max-w-[120px]" title={row.state}>
+                                  {row.state}
+                                </td>
+                                <td className="px-3 py-1.5 truncate max-w-[180px]" title={row.industry}>
+                                  {INDUSTRY_SHORT_NAMES[row.industry] || row.industry}
+                                </td>
+                                <td className={cn(
+                                  'px-3 py-1.5 text-right font-mono tabular-nums',
+                                  row.annual_cagr > 0.05 && 'text-red-600 dark:text-red-400 font-semibold',
+                                  row.annual_cagr < -0.03 && 'text-blue-600 dark:text-blue-400 font-semibold',
+                                )}>
+                                  {(row.annual_cagr * 100).toFixed(2)}%
+                                  {isCapped && <span className="ml-1 text-yellow-600 dark:text-yellow-400" title="Will be capped">*</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                                  {formatGDP(row.base_gdp)}
+                                </td>
+                                <td className={cn(
+                                  'px-3 py-1.5 text-right font-mono tabular-nums',
+                                  multiplier > 5 && 'text-red-600 dark:text-red-400',
+                                )}>
+                                  {multiplier.toFixed(1)}x
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex items-center justify-between border-t px-3 py-2 bg-muted/30">
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        {config.forecast.cagr_cap > 0 && (
+                          <span>
+                            <span className="inline-block w-2 h-2 rounded-sm bg-yellow-200 dark:bg-yellow-800 mr-1" />
+                            * = will be capped at {'\u00B1'}{(config.forecast.cagr_cap * 100).toFixed(1)}%
+                          </span>
+                        )}
+                        <span>
+                          <span className="inline-block w-2 h-2 rounded-sm bg-red-100 dark:bg-red-900/30 mr-1" />
+                          &gt;5% highlighted
+                        </span>
+                      </div>
+                      {cagrPreview.length > 30 && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => setCagrShowAll(!cagrShowAll)}
+                        >
+                          {cagrShowAll ? 'Show Top 30' : `Show All ${cagrPreview.length}`}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* ── CAGR Cap Slider ──────────────────────────────────── */}
               <SliderWithInput
-                label="Depreciation Rate"
-                description="Annual rate at which capital wears out. Higher depreciation means more investment is needed just to maintain the capital stock."
-                value={config.production_function.depreciation_rate}
-                onChange={(v) => updateProdFn('depreciation_rate', v)}
-                min={0.01}
+                label="CAGR Cap (Optional)"
+                description="Set a maximum annual growth rate to cap extreme outliers identified above. Set to 0 to apply no cap."
+                value={config.forecast.cagr_cap}
+                onChange={(v) => updateForecast('cagr_cap', v)}
+                min={0}
                 max={0.15}
                 step={0.005}
                 displayAsPercent
               />
-              <ComputedValue
-                label="Implied Capital Growth: (I/Y) / (K/Y) - delta + adj ="
-                value={formatPercent(impliedCapitalGrowth) + '/yr'}
-              />
-            </div>
-          </AccordionContent>
-        </AccordionItem>
-
-        {/* ━━ Section 3: TFP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <AccordionItem value={3}>
-          <AccordionTrigger className="text-base px-1">
-            <div className="flex items-center gap-2">
-              <span>TFP (Total Factor Productivity)</span>
-              <Badge variant="secondary">{formatPercent(config.tfp.national_growth_rate)}/yr</Badge>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-1">
-            <div className="space-y-5 pt-2">
-              <SliderWithInput
-                label="National Growth Rate"
-                description="TFP captures technological progress, innovation, and efficiency gains. This is the single most important driver of long-term GDP growth. US long-run average: 1.0-1.5%."
-                value={config.tfp.national_growth_rate}
-                onChange={(v) => updateTfp('national_growth_rate', v)}
-                min={-0.01}
-                max={0.05}
-                step={0.001}
-                displayAsPercent
-              />
-              <SliderWithInput
-                label="Convergence Rate"
-                description="Speed at which lagging states converge toward the national TFP level. 0 = no convergence, 5% = fast convergence."
-                value={config.tfp.convergence_rate}
-                onChange={(v) => updateTfp('convergence_rate', v)}
-                min={0}
-                max={0.10}
-                step={0.005}
-                displayAsPercent
-              />
-
-              {/* Industry TFP Overrides */}
-              <CollapsibleSection title="Industry-Specific TFP Overrides">
-                <div className="space-y-1">
-                  <div className="grid grid-cols-[1fr_100px_36px] gap-2 items-center text-xs font-medium text-muted-foreground pb-1">
-                    <span>Industry</span>
-                    <span className="text-center">TFP (%)</span>
-                    <span />
-                  </div>
-                  {LEAF_INDUSTRIES.map((industry) => {
-                    const hasOverride = industry in config.tfp.by_industry;
-                    const currentValue = config.tfp.by_industry[industry] ?? defaultIndustryTfp[industry];
-                    const isModified = hasOverride && config.tfp.by_industry[industry] !== defaultIndustryTfp[industry];
-                    return (
-                      <div
-                        key={industry}
-                        className={cn(
-                          'grid grid-cols-[1fr_100px_36px] gap-2 items-center py-1 rounded px-1',
-                          isModified && 'bg-primary/5'
-                        )}
-                      >
-                        <span className="text-sm truncate" title={industry}>
-                          {INDUSTRY_SHORT_NAMES[industry] || industry}
-                        </span>
-                        <PercentInput
-                          value={currentValue}
-                          onChange={(v) => setTfpIndustryOverride(industry, v)}
-                          step={0.1}
-                          decimals={1}
-                        />
-                        {hasOverride ? (
-                          <button
-                            type="button"
-                            onClick={() => removeTfpIndustryOverride(industry)}
-                            className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title="Remove override"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        ) : (
-                          <div className="h-7 w-7" />
-                        )}
-                      </div>
-                    );
-                  })}
+              {config.forecast.cagr_cap > 0 && (
+                <div className="rounded-md bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 px-3 py-2 text-sm">
+                  <span className="font-medium">Cap active: </span>
+                  All state-industry growth rates will be clamped to {'\u00B1'}{(config.forecast.cagr_cap * 100).toFixed(1)}%.
+                  {' '}This affects {cagrPreview.filter(r => Math.abs(r.annual_cagr) > config.forecast.cagr_cap).length} of {cagrPreview.length} pairs.
                 </div>
-              </CollapsibleSection>
-
-              {/* State TFP Overrides */}
-              <CollapsibleSection title="State-Specific TFP Overrides">
-                <div className="space-y-2">
-                  {Object.entries(config.tfp.by_state).length > 0 && (
-                    <div className="space-y-1">
-                      {Object.entries(config.tfp.by_state).map(([state, rate]) => (
-                        <div key={state} className="grid grid-cols-[1fr_100px_36px] gap-2 items-center px-1 py-1">
-                          <span className="text-sm">{state}</span>
-                          <PercentInput
-                            value={rate as number}
-                            onChange={(v) => setTfpStateOverride(state, v)}
-                            step={0.1}
-                            decimals={1}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeTfpStateOverride(state)}
-                            className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title="Remove override"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 pt-1">
-                    <select
-                      value={newTfpState}
-                      onChange={(e) => setNewTfpState(e.target.value)}
-                      className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm"
-                    >
-                      <option value="">Select state...</option>
-                      {US_STATES.filter(s => !(s in config.tfp.by_state)).map((state) => (
-                        <option key={state} value={state}>{state}</option>
-                      ))}
-                    </select>
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      disabled={!newTfpState}
-                      onClick={() => {
-                        if (newTfpState) {
-                          setTfpStateOverride(newTfpState, config.tfp.national_growth_rate);
-                          setNewTfpState('');
-                        }
-                      }}
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add
-                    </Button>
-                  </div>
-                  {Object.keys(config.tfp.by_state).length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      No state-specific TFP overrides. Add one to set a different TFP rate for a specific state.
-                    </p>
-                  )}
-                </div>
-              </CollapsibleSection>
+              )}
             </div>
           </AccordionContent>
         </AccordionItem>
 
-        {/* ━━ Section 4: Capital & Investment ━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <AccordionItem value={4}>
-          <AccordionTrigger className="text-base px-1">
-            <div className="flex items-center gap-2">
-              <span>Capital & Investment</span>
-              <Badge variant="secondary">I/Y = {formatPercent(config.capital.investment_to_gdp_ratio)}</Badge>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-1">
-            <div className="space-y-5 pt-2">
-              <SliderWithInput
-                label="Investment/GDP Ratio"
-                description="Share of GDP that goes to investment. Higher values mean more capital accumulation and faster growth."
-                value={config.capital.investment_to_gdp_ratio}
-                onChange={(v) => updateCapital('investment_to_gdp_ratio', v)}
-                min={0.10}
-                max={0.40}
-                step={0.01}
-                displayAsPercent
-              />
-              <SliderWithInput
-                label="Capital/Output Ratio"
-                description="K/Y ratio: how much capital is needed per unit of GDP. Higher values mean more capital-intensive economy."
-                value={config.capital.capital_output_ratio}
-                onChange={(v) => updateCapital('capital_output_ratio', v)}
-                min={1.5}
-                max={6.0}
-                step={0.1}
-              />
-              <SliderWithInput
-                label="CapEx Growth Adjustment"
-                description="Extra annual boost or drag on investment growth. Positive = investment boom, negative = investment slump."
-                value={config.capital.capex_growth_adjustment}
-                onChange={(v) => updateCapital('capex_growth_adjustment', v)}
-                min={-0.03}
-                max={0.03}
-                step={0.001}
-                displayAsPercent
-              />
-              <ComputedValue
-                label="Implied Capital Growth: (I/Y) / (K/Y) - delta + adj ="
-                value={formatPercent(impliedCapitalGrowth) + '/yr'}
-              />
-
-              {/* Industry Capital Overrides */}
-              <CollapsibleSection title="Industry-Specific Capital Overrides">
-                <div className="space-y-1">
-                  <div className="grid grid-cols-[1fr_90px_90px] gap-2 items-center text-xs font-medium text-muted-foreground pb-1">
-                    <span>Industry</span>
-                    <span className="text-center">Invest (%)</span>
-                    <span className="text-center">Alpha (%)</span>
-                  </div>
-                  {LEAF_INDUSTRIES.map((industry) => {
-                    const override = config.capital.by_industry[industry];
-                    const defaultOverride = defaults.capital.by_industry[industry];
-                    const investRatio = override?.investment_ratio ?? defaultOverride?.investment_ratio ?? config.capital.investment_to_gdp_ratio;
-                    const alpha = override?.alpha ?? defaultOverride?.alpha ?? config.production_function.alpha;
-                    return (
-                      <div
-                        key={industry}
-                        className="grid grid-cols-[1fr_90px_90px] gap-2 items-center py-1 px-1"
-                      >
-                        <span className="text-sm truncate" title={industry}>
-                          {INDUSTRY_SHORT_NAMES[industry] || industry}
-                        </span>
-                        <PercentInput
-                          value={investRatio}
-                          onChange={(v) => setCapitalIndustryOverride(industry, 'investment_ratio', v)}
-                          step={1}
-                          decimals={0}
-                        />
-                        <PercentInput
-                          value={alpha}
-                          onChange={(v) => setCapitalIndustryOverride(industry, 'alpha', v)}
-                          step={1}
-                          decimals={0}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </CollapsibleSection>
-            </div>
-          </AccordionContent>
-        </AccordionItem>
-
-        {/* ━━ Section 5: Labor Force ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <AccordionItem value={5}>
-          <AccordionTrigger className="text-base px-1">
-            <div className="flex items-center gap-2">
-              <span>Labor Force</span>
-              <Badge variant="secondary">LFPR {formatPercent(config.labor.lfpr_trend)}/yr</Badge>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent className="px-1">
-            <div className="space-y-5 pt-2">
-              <SliderWithInput
-                label="LFPR Trend"
-                description="Annual change in labor force participation rate. Negative means fewer people choosing to work. US LFPR peaked at ~67% in 2000, declined to ~62% by 2020."
-                value={config.labor.lfpr_trend}
-                onChange={(v) => updateLabor('lfpr_trend', v)}
-                min={-0.005}
-                max={0.003}
-                step={0.0005}
-                displayAsPercent
-              />
-              <SliderWithInput
-                label="Working-Age Share Trend"
-                description="Annual change in the 15-64 age group as share of population. Negative means the population is aging."
-                value={config.labor.working_age_share_trend}
-                onChange={(v) => updateLabor('working_age_share_trend', v)}
-                min={-0.005}
-                max={0.001}
-                step={0.0005}
-                displayAsPercent
-              />
-              <SliderWithInput
-                label="Natural Unemployment Rate"
-                description="Long-run equilibrium unemployment rate. Does not directly affect GDP growth rate but is used for structural labor calculations."
-                value={config.labor.natural_unemployment_rate}
-                onChange={(v) => updateLabor('natural_unemployment_rate', v)}
-                min={0.02}
-                max={0.08}
-                step={0.005}
-                displayAsPercent
-              />
-              <SliderWithInput
-                label="Hours Growth"
-                description="Annual change in average hours worked per worker. Negative = trend toward shorter workweeks."
-                value={config.labor.hours_growth}
-                onChange={(v) => updateLabor('hours_growth', v)}
-                min={-0.003}
-                max={0.003}
-                step={0.0005}
-                displayAsPercent
-              />
-              <ComputedValue
-                label="Implied Labor Growth (excl. population):"
-                value={formatPercent(impliedLaborGrowth) + '/yr'}
-              />
-            </div>
-          </AccordionContent>
-        </AccordionItem>
-
-        {/* ━━ Section 6: Population ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-        <AccordionItem value={6}>
+        {/* ━━ Section 2: Population ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+        <AccordionItem value={2}>
           <AccordionTrigger className="text-base px-1">
             <div className="flex items-center gap-2">
               <span>Population</span>
@@ -1029,8 +691,8 @@ export default function ConfigurePage() {
               />
 
               <SliderWithInput
-                label="Fit Start Year"
-                description="Compute recent growth rates (CAGR) from this year. More recent = captures current migration trends; earlier = smooths volatility."
+                label="Population Fit Start Year"
+                description="Compute recent population growth rates (CAGR) from this year. More recent = captures current migration trends; earlier = smooths volatility."
                 value={config.population.fit_start_year}
                 onChange={(v) => updatePopulation('fit_start_year', Math.round(v))}
                 min={2000}
@@ -1123,8 +785,8 @@ export default function ConfigurePage() {
           </AccordionContent>
         </AccordionItem>
 
-        {/* ━━ Section 7: Industry Structural Shifts ━━━━━━━━━━━━━━━━━━━━ */}
-        <AccordionItem value={7}>
+        {/* ━━ Section 3: Industry Structural Shifts ━━━━━━━━━━━━━━━━━━━━ */}
+        <AccordionItem value={3}>
           <AccordionTrigger className="text-base px-1">
             <div className="flex items-center gap-2">
               <span>Industry Structural Shifts</span>

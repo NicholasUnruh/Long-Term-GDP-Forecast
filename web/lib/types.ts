@@ -72,28 +72,8 @@ export interface ForecastConfig {
   forecast: {
     start_quarter: string;
     end_year: number;
-  };
-  production_function: {
-    alpha: number;
-    depreciation_rate: number;
-  };
-  tfp: {
-    national_growth_rate: number;
-    by_industry: Record<string, number>;
-    by_state: Record<string, number>;
-    convergence_rate: number;
-  };
-  capital: {
-    investment_to_gdp_ratio: number;
-    capital_output_ratio: number;
-    capex_growth_adjustment: number;
-    by_industry: Record<string, { investment_ratio: number; alpha: number }>;
-  };
-  labor: {
-    lfpr_trend: number;
-    working_age_share_trend: number;
-    natural_unemployment_rate: number;
-    hours_growth: number;
+    historical_range_start_year: number | null;
+    cagr_cap: number;
   };
   population: {
     fit_start_year: number;
@@ -111,10 +91,6 @@ export interface ForecastConfig {
 export interface ForecastRequest {
   scenario?: string;
   forecast?: Partial<ForecastConfig['forecast']>;
-  production_function?: Partial<ForecastConfig['production_function']>;
-  tfp?: Partial<ForecastConfig['tfp']>;
-  capital?: Partial<ForecastConfig['capital']>;
-  labor?: Partial<ForecastConfig['labor']>;
   population?: Partial<ForecastConfig['population']>;
   industry?: Partial<ForecastConfig['industry']>;
 }

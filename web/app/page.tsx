@@ -24,20 +24,20 @@ export default function ModelDescriptionPage() {
         <div className="container py-16 md:py-24 max-w-4xl mx-auto">
           <div className="mx-auto max-w-3xl text-center">
             <Badge variant="secondary" className="mb-4">
-              Supply-Side Growth Model
+              Historical CAGR Extrapolation Model
             </Badge>
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
               Long-Term US GDP Forecast Model
             </h1>
             <p className="mt-4 text-lg text-muted-foreground md:text-xl">
-              A Cobb-Douglas production function approach to forecasting real GDP
+              Extrapolates historical compound annual growth rates (CAGR) to forecast real GDP
               across <strong>50 states + DC</strong>, <strong>23 industries</strong>,
               from <strong>2025 to 2050</strong>.
             </p>
             <p className="mt-3 text-sm text-muted-foreground">
               Quarterly GDP projections, annual population forecasts, and GDP per
-              capita -- all driven by configurable assumptions about technology,
-              investment, and the labor force.
+              capita -- all driven by historical trends with configurable data range
+              and population assumptions.
             </p>
           </div>
         </div>
@@ -55,10 +55,10 @@ export default function ModelDescriptionPage() {
               <h3 className="font-medium">What It Does</h3>
               <p className="mt-1 text-sm text-muted-foreground">
                 Projects US real GDP by state and industry from the last observed
-                quarter (2025:Q3) through the end of 2050 using a neoclassical
-                supply-side growth framework. Each state-industry pair receives its
-                own constant quarterly growth rate derived from technology,
-                investment, and labor assumptions.
+                quarter (2025:Q3) through the end of 2050 using historical CAGR
+                extrapolation. Each state-industry pair receives its own constant
+                quarterly growth rate computed from BEA historical data over a
+                configurable date range.
               </p>
             </div>
             <div>
@@ -85,62 +85,53 @@ export default function ModelDescriptionPage() {
         </section>
 
         {/* ================================================================== */}
-        {/*  PRODUCTION FUNCTION                                               */}
+        {/*  METHODOLOGY                                                       */}
         {/* ================================================================== */}
         <section>
           <h2 className="text-2xl font-semibold tracking-tight">
-            The Production Function
+            Methodology
           </h2>
           <Separator className="my-4" />
           <div className="max-w-3xl space-y-4">
             <p className="text-sm text-muted-foreground">
-              The model is built on the <strong>Cobb-Douglas production function</strong>,
-              which relates output to three inputs: technology (Total Factor
-              Productivity), physical capital, and labor. This is the standard
-              framework used by the Congressional Budget Office and most
-              macroeconomic forecasting agencies.
+              The model extrapolates <strong>historical compound annual growth rates (CAGR)</strong> for
+              each state-industry pair. Growth rates are computed from BEA quarterly GDP data over
+              a configurable historical range, then projected forward to the end year.
             </p>
 
             <div className="rounded-lg border bg-card p-6">
               <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Level Form
+                Core Equation
               </p>
-              <BlockEquation math="Y = A \cdot K^{\alpha} \cdot L^{1-\alpha}" />
+              <BlockEquation math="\text{CAGR} = \left(\frac{GDP_{\text{end}}}{GDP_{\text{start}}}\right)^{1/n} - 1" />
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span><InlineEquation math="Y" /> = Real GDP</span>
+                <span><InlineEquation math="GDP_{\text{start}}" /> = First observed value in range</span>
                 <span className="text-border">|</span>
-                <span><InlineEquation math="A" /> = TFP</span>
+                <span><InlineEquation math="GDP_{\text{end}}" /> = Last observed value</span>
                 <span className="text-border">|</span>
-                <span><InlineEquation math="K" /> = Capital stock</span>
-                <span className="text-border">|</span>
-                <span><InlineEquation math="L" /> = Labor input</span>
-                <span className="text-border">|</span>
-                <span><InlineEquation math="\alpha" /> = Capital share (0.30)</span>
+                <span><InlineEquation math="n" /> = Number of periods</span>
               </div>
             </div>
 
             <p className="text-sm text-muted-foreground">
-              For forecasting, we work with the <strong>growth-rate form</strong>,
-              which decomposes GDP growth into contributions from each factor:
+              Each quarterly growth rate is then used to project GDP forward:
             </p>
 
             <div className="rounded-lg border bg-card p-6">
               <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Growth Form (the core equation)
+                Projection
               </p>
-              <BlockEquation math="\frac{\Delta Y}{Y} = \frac{\Delta A}{A} + \alpha \cdot \frac{\Delta K}{K} + (1 - \alpha) \cdot \frac{\Delta L}{L}" />
+              <BlockEquation math="GDP_{t+1} = GDP_t \times (1 + g_q)" />
               <p className="mt-3 text-xs text-muted-foreground">
-                With default parameters: GDP growth = TFP growth + 0.30 &times;
-                Capital growth + 0.70 &times; Labor growth. The capital share{" "}
-                <InlineEquation math="\alpha" /> can be overridden per industry
-                (e.g., 0.50 for Real Estate, 0.20 for Education).
+                where <InlineEquation math="g_q" /> is the quarterly CAGR computed from historical data.
+                The historical range can be adjusted to capture different economic conditions --
+                a longer range smooths out volatility, while a shorter range captures recent trends.
               </p>
             </div>
 
             <p className="text-sm text-muted-foreground">
-              All annual growth rates are converted to quarterly using{" "}
-              <InlineEquation math="g_q = (1 + g_a)^{0.25} - 1" />, ensuring
-              proper compounding over the 25-year forecast horizon.
+              GDP per capita is then computed by dividing GDP by the population forecast
+              for each state, giving per-industry per capita output at the state level.
             </p>
           </div>
         </section>
@@ -154,53 +145,12 @@ export default function ModelDescriptionPage() {
           </h2>
           <Separator className="my-4" />
           <p className="mb-6 text-sm text-muted-foreground max-w-3xl">
-            Each of the three production factors -- technology, capital, and labor --
-            is modeled separately with its own set of configurable parameters.
-            Together, they determine the growth rate of every state-industry pair.
+            The forecast combines historical GDP trends with population projections
+            and optional industry structural shifts to generate per capita GDP forecasts.
           </p>
 
           <div className="grid gap-6 md:grid-cols-3">
-            {/* --- TFP Card --- */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
-                    <Cpu className="h-4 w-4 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle>TFP (Technology)</CardTitle>
-                    <CardDescription>Total Factor Productivity</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-md bg-muted/50 p-3 overflow-x-auto">
-                  <BlockEquation math="g_{TFP} = \text{national} + \Delta_{\text{industry}} + \Delta_{\text{state}}" />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Captures technological progress, innovation, and efficiency
-                  improvements. The single most important driver of long-term
-                  growth. Configured as a national baseline with optional
-                  per-industry and per-state overrides applied as a cascade.
-                </p>
-                <div className="space-y-1">
-                  <p className="text-xs font-medium">Key Parameters</p>
-                  <div className="flex flex-wrap gap-1">
-                    <Badge variant="outline">national: 1.2%</Badge>
-                    <Badge variant="outline">Info: 2.2%</Badge>
-                    <Badge variant="outline">Prof. Services: 1.8%</Badge>
-                    <Badge variant="outline">Mining: 0.5%</Badge>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  CBO historical trend: ~1.0%. Our baseline adds +0.15pp for moderate
-                  AI gains (Penn Wharton/OECD estimates). Industry TFP calibrated from
-                  BLS 2019-2024 data.
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* --- Capital Card --- */}
+            {/* --- GDP CAGR Card --- */}
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -208,40 +158,36 @@ export default function ModelDescriptionPage() {
                     <TrendingUp className="h-4 w-4 text-primary" />
                   </div>
                   <div>
-                    <CardTitle>Capital (Investment)</CardTitle>
-                    <CardDescription>Physical capital accumulation</CardDescription>
+                    <CardTitle>GDP Growth (CAGR)</CardTitle>
+                    <CardDescription>Historical trend extrapolation</CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="rounded-md bg-muted/50 p-3 overflow-x-auto">
-                  <BlockEquation math="g_K = \frac{I/Y}{K/Y} - \delta + \text{adj}" />
+                  <BlockEquation math="g_q = \left(\frac{GDP_{\text{end}}}{GDP_{\text{start}}}\right)^{1/n} - 1" />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Capital growth depends on the investment-to-GDP ratio, the
-                  capital-output ratio, the depreciation rate, and an optional
-                  capex adjustment. With defaults: 0.21/3.0 - 0.05 + 0.002 = 2.20%
-                  annual capital growth.
+                  Each state-industry pair gets its own quarterly growth rate
+                  computed from BEA historical data. The historical range is
+                  configurable -- use more years for stability or fewer years
+                  to capture recent trends.
                 </p>
                 <div className="space-y-1">
                   <p className="text-xs font-medium">Key Parameters</p>
                   <div className="flex flex-wrap gap-1">
-                    <Badge variant="outline">I/Y: 0.21</Badge>
-                    <Badge variant="outline">K/Y: 3.0</Badge>
-                    <Badge variant="outline"><InlineEquation math="\delta" />: 5.0%</Badge>
-                    <Badge variant="outline">adj: +0.2%</Badge>
+                    <Badge variant="outline">Default: All data (2005+)</Badge>
+                    <Badge variant="outline">Range: 2005-2024</Badge>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Per-industry overrides for both investment ratio and{" "}
-                  <InlineEquation math="\alpha" /> (e.g., Utilities{" "}
-                  <InlineEquation math="\alpha" />=0.45, Education{" "}
-                  <InlineEquation math="\alpha" />=0.20).
+                  Data source: BEA quarterly GDP by state and industry in millions
+                  of chained 2017 dollars. 83 quarters of data available.
                 </p>
               </CardContent>
             </Card>
 
-            {/* --- Labor Card --- */}
+            {/* --- Population Card --- */}
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -249,34 +195,68 @@ export default function ModelDescriptionPage() {
                     <Users className="h-4 w-4 text-primary" />
                   </div>
                   <div>
-                    <CardTitle>Labor (Workforce)</CardTitle>
-                    <CardDescription>Labor force dynamics</CardDescription>
+                    <CardTitle>Population</CardTitle>
+                    <CardDescription>State-level projections</CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="rounded-md bg-muted/50 p-3 overflow-x-auto">
-                  <BlockEquation math="g_L = g_{\text{pop}} + \Delta\text{LFPR} + \Delta\text{WAS} + g_{\text{hours}}" />
+                  <BlockEquation math="r(t) = r_0 \cdot (1 - d)^t" />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Labor growth is derived from population growth (state-level
-                  forecast) plus adjustments for labor force participation rate
-                  trends, working-age share changes, and average hours worked.
-                  Negative values represent demographic headwinds from an aging
-                  population.
+                  Decelerating growth model calibrated to a national population
+                  target. Each state&apos;s share of national population evolves based
+                  on relative growth differentials, damped over time.
                 </p>
                 <div className="space-y-1">
                   <p className="text-xs font-medium">Key Parameters</p>
                   <div className="flex flex-wrap gap-1">
-                    <Badge variant="outline">LFPR: -0.14%/yr</Badge>
-                    <Badge variant="outline">WAS: -0.2%/yr</Badge>
-                    <Badge variant="outline">Unemp: 4.0%</Badge>
-                    <Badge variant="outline">Hours: -0.1%</Badge>
+                    <Badge variant="outline">Target: 370M (2050)</Badge>
+                    <Badge variant="outline">Decel: 4%</Badge>
+                    <Badge variant="outline">Damping: 3%</Badge>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  US LFPR peaked at ~67% in 2000, declined to ~62% by 2020.
-                  Working-age share declining as baby boomers retire.
+                  Based on Census Bureau (~369M) and Cooper Center (~371M) consensus.
+                  State-specific growth rate overrides available.
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* --- Per Capita Card --- */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+                    <Cpu className="h-4 w-4 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle>GDP Per Capita</CardTitle>
+                    <CardDescription>State-industry level output</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-md bg-muted/50 p-3 overflow-x-auto">
+                  <BlockEquation math="\text{PC}_{s,i} = \frac{GDP_{s,i} \times 10^6}{Pop_s}" />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  GDP per capita is computed at the state-industry level by
+                  dividing the GDP forecast (in millions) by the state population
+                  forecast. Available annually from 2010 through 2050.
+                </p>
+                <div className="space-y-1">
+                  <p className="text-xs font-medium">Coverage</p>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge variant="outline">51 states</Badge>
+                    <Badge variant="outline">23 industries</Badge>
+                    <Badge variant="outline">41 years</Badge>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Combines quarterly GDP (averaged to annual) with annual population
+                  to produce per capita output at every state-industry intersection.
                 </p>
               </CardContent>
             </Card>

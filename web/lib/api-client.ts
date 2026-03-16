@@ -21,6 +21,18 @@ export const getScenarios = () => fetchAPI<Record<string, any>>('/config/scenari
 
 // Data endpoints
 export const getStates = () => fetchAPI<string[]>('/data/states');
+
+export interface CAGRPreviewRow {
+  state: string;
+  industry: string;
+  annual_cagr: number;
+  base_gdp: number;
+}
+
+export const getCAGRPreview = (startYear: number | null) => {
+  const params = startYear ? `?start_year=${startYear}` : '';
+  return fetchAPI<CAGRPreviewRow[]>(`/data/cagr-preview${params}`);
+};
 export const getIndustries = () => fetchAPI<{
   leaf: string[];
   sub_aggregate: Record<string, string[]>;

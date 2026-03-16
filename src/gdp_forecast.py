@@ -4,19 +4,50 @@ from src.utils import (
     generate_quarter_range, LEAF_INDUSTRIES, SUB_AGGREGATE_INDUSTRIES,
     AGGREGATE_INDUSTRIES, quarter_to_date,
 )
-from src.labor_forecast import compute_labor_growth_quarterly
-from src.capital_forecast import compute_capital_growth_quarterly, get_alpha
-from src.tfp_forecast import get_tfp_growth_quarterly
 
 
-def compute_gdp_growth_quarterly(config, state, industry, pop_growth_annual):
-    tfp_g = get_tfp_growth_quarterly(config, state, industry)
-    cap_g = compute_capital_growth_quarterly(config, industry)
-    lab_g = compute_labor_growth_quarterly(pop_growth_annual, config)
-    alpha = get_alpha(config, industry)
+def compute_historical_cagr(gdp_df, state, industry, start_year=None, cagr_cap=None):
+    """Compute the annualized CAGR for a state-industry pair from historical data.
 
-    gdp_growth = tfp_g + alpha * cap_g + (1 - alpha) * lab_g
-    return gdp_growth
+    If start_year is None, uses the full available range (max range).
+    If cagr_cap is provided, clamps the annual CAGR to [-cap, +cap].
+    Returns (annual_cagr, quarterly_cagr). Falls back to 0.02 annual if data is insufficient.
+    """
+    mask = (gdp_df["state"] == state) & (gdp_df["industry"] == industry)
+    subset = gdp_df[mask].sort_values("date")
+
+    if len(subset) < 2:
+        return 0.02, (1.02 ** 0.25) - 1  # fallback: 2% annual
+
+    if start_year is not None:
+        subset = subset[subset["date"].dt.year >= start_year]
+        if len(subset) < 2:
+            # Not enough data in the requested range; use all available
+            subset = gdp_df[mask].sort_values("date")
+
+    first_val = float(subset.iloc[0]["real_gdp"])
+    last_val = float(subset.iloc[-1]["real_gdp"])
+
+    if first_val <= 0 or last_val <= 0:
+        return 0.02, (1.02 ** 0.25) - 1
+
+    n_quarters = len(subset) - 1
+    if n_quarters == 0:
+        return 0.02, (1.02 ** 0.25) - 1
+
+    # Quarterly CAGR
+    quarterly_cagr = (last_val / first_val) ** (1.0 / n_quarters) - 1
+
+    # Annualize
+    annual_cagr = (1 + quarterly_cagr) ** 4 - 1
+
+    # Cap extreme values to prevent unrealistic compounding over 25+ years
+    if cagr_cap is not None and cagr_cap > 0:
+        annual_cagr = max(-cagr_cap, min(cagr_cap, annual_cagr))
+        # Recompute quarterly from capped annual
+        quarterly_cagr = (1 + annual_cagr) ** 0.25 - 1
+
+    return annual_cagr, quarterly_cagr
 
 
 def get_base_gdp(gdp_df, state, industry):
@@ -29,27 +60,21 @@ def get_base_gdp(gdp_df, state, industry):
 
 
 def forecast_state_industry(gdp_df, pop_forecast_df, config, state, industry, end_year):
+    """Forecast a single state-industry pair using historical CAGR extrapolation."""
     base_gdp, last_quarter = get_base_gdp(gdp_df, state, industry)
     if np.isnan(base_gdp) or last_quarter is None:
         return pd.DataFrame()
 
-    pop_state = pop_forecast_df[pop_forecast_df["state"] == state].sort_values("year")
-    if len(pop_state) < 2:
-        pop_growth_annual = 0.005
-    else:
-        recent = pop_state.tail(10)
-        if len(recent) >= 2:
-            pop_growth_annual = (recent["population"].iloc[-1] / recent["population"].iloc[0]) ** (
-                1 / (len(recent) - 1)
-            ) - 1
-        else:
-            pop_growth_annual = 0.005
+    # Get the historical range start year from config (None = use all data)
+    hist_start = config.get("forecast", {}).get("historical_range_start_year", None)
+    cagr_cap = config.get("forecast", {}).get("cagr_cap", 0)  # default 0 = no cap
 
-    growth_q = compute_gdp_growth_quarterly(config, state, industry, pop_growth_annual)
+    _, growth_q = compute_historical_cagr(gdp_df, state, industry, start_year=hist_start, cagr_cap=cagr_cap)
 
     forecast_start_q = config["forecast"]["start_quarter"]
     quarters = generate_quarter_range(forecast_start_q, end_year)
 
+    # Handle gap between last data point and forecast start
     data_end = _next_quarter(last_quarter)
     gap_quarters = generate_quarter_range(data_end, int(forecast_start_q.split(":")[0]))
     gap_quarters = [q for q in gap_quarters if q < forecast_start_q]

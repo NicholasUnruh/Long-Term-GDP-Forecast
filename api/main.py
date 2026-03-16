@@ -32,8 +32,8 @@ from api.routers.forecast import _jobs, _now_iso
 app = FastAPI(
     title="Long-Term GDP Forecast API",
     description=(
-        "REST API wrapping a Cobb-Douglas production-function model that "
-        "forecasts US real GDP by state and industry from 2025 to 2050."
+        "REST API forecasting US real GDP by state and industry from 2025 to 2050 "
+        "using historical CAGR extrapolation with configurable data ranges."
     ),
     version="1.0.0",
 )

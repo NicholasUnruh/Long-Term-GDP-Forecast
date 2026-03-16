@@ -30,6 +30,22 @@ forecast:
   end_year: 2050                  # Final year of the projection
   frequency: "quarterly"          # GDP is projected quarterly; population annually
 
+  # Historical range for computing CAGR growth rates per state-industry.
+  # GDP growth is projected by extrapolating the compound annual growth rate (CAGR)
+  # computed from historical BEA data between this start year and the last available quarter.
+  # Set to null or omit to use the full available range (2005:Q1 onward).
+  # More recent = captures current trends | Earlier = smooths out volatility
+  # Range: 2005 - 2024
+  historical_range_start_year: null
+
+  # Maximum annual CAGR (absolute value) allowed per state-industry pair.
+  # Caps extreme growth rates to prevent unrealistic compounding over 25+ years.
+  # Without a cap, outliers like CA Information (8.7%) or ND Mining (15.4%) produce
+  # large 2050 values. Set to 0 to disable capping (default).
+  # Use the CAGR preview on the configure page to inspect outliers before choosing a cap.
+  # Range: 0 (no cap) to 0.10 (permissive, ~10%)
+  cagr_cap: 0
+
 
 # ==============================================================================
 #  PRODUCTION FUNCTION  (Cobb-Douglas)

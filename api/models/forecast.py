@@ -16,86 +16,17 @@ class ForecastHorizon(BaseModel):
         le=2100,
         description="Final year of the projection",
     )
-
-
-class ProductionFunction(BaseModel):
-    alpha: float = Field(
-        default=0.30,
-        ge=0.10,
-        le=0.60,
-        description="Capital share of output",
+    historical_range_start_year: Optional[int] = Field(
+        default=None,
+        ge=2005,
+        le=2024,
+        description="Start year for historical CAGR computation. null = use all available data (2005+).",
     )
-    depreciation_rate: float = Field(
-        default=0.05,
-        ge=0.01,
-        le=0.15,
-        description="Annual depreciation rate",
-    )
-
-
-class TFPConfig(BaseModel):
-    national_growth_rate: float = Field(
-        default=0.010,
-        description="Baseline annual TFP growth rate",
-    )
-    by_industry: dict[str, float] = Field(
-        default_factory=dict,
-        description="Industry-specific TFP overrides",
-    )
-    by_state: dict[str, float] = Field(
-        default_factory=dict,
-        description="State-specific TFP overrides",
-    )
-    convergence_rate: float = Field(
-        default=0.02,
-        description="Speed at which lagging states converge",
-    )
-
-
-class CapitalByIndustry(BaseModel):
-    investment_ratio: float = Field(
-        description="Share of industry GDP reinvested in capital",
-    )
-    alpha: float = Field(
-        description="Industry-specific capital share",
-    )
-
-
-class CapitalConfig(BaseModel):
-    investment_to_gdp_ratio: float = Field(
-        default=0.20,
-        description="Share of GDP that goes to investment",
-    )
-    capital_output_ratio: float = Field(
-        default=3.0,
-        description="K/Y ratio (capital per unit of GDP)",
-    )
-    capex_growth_adjustment: float = Field(
-        default=0.0,
-        description="Extra annual boost/drag on investment",
-    )
-    by_industry: dict[str, CapitalByIndustry] = Field(
-        default_factory=dict,
-        description="Industry-specific capital parameters",
-    )
-
-
-class LaborConfig(BaseModel):
-    lfpr_trend: float = Field(
-        default=-0.001,
-        description="Labor force participation rate change per year",
-    )
-    working_age_share_trend: float = Field(
-        default=-0.002,
-        description="Change in 15-64 age group share per year",
-    )
-    natural_unemployment_rate: float = Field(
-        default=0.04,
-        description="Long-run unemployment rate",
-    )
-    hours_growth: float = Field(
-        default=0.0,
-        description="Annual change in average hours worked per worker",
+    cagr_cap: Optional[float] = Field(
+        default=0,
+        ge=0.0,
+        le=0.20,
+        description="Maximum annual CAGR (absolute value) per state-industry. Caps extreme outliers. 0 = no cap.",
     )
 
 
@@ -148,9 +79,5 @@ class ForecastRequest(BaseModel):
         ),
     )
     forecast: Optional[ForecastHorizon] = None
-    production_function: Optional[ProductionFunction] = None
-    tfp: Optional[TFPConfig] = None
-    capital: Optional[CapitalConfig] = None
-    labor: Optional[LaborConfig] = None
     population: Optional[PopulationConfig] = None
     industry: Optional[IndustryConfig] = None
