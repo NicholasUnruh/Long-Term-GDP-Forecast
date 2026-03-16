@@ -3,8 +3,16 @@ import numpy as np
 from pathlib import Path
 from src.utils import PROJECT_ROOT, quarter_to_date
 
+# Module-level cache for parsed DataFrames (avoids re-parsing CSV on every call)
+_gdp_cache: pd.DataFrame | None = None
+_pop_cache: pd.DataFrame | None = None
+
 
 def load_gdp_data(path=None):
+    global _gdp_cache
+    if _gdp_cache is not None and path is None:
+        return _gdp_cache
+
     path = path or PROJECT_ROOT / "real_gdp.csv"
     raw = pd.read_csv(path, encoding="utf-8-sig", header=None, low_memory=False)
 
@@ -41,10 +49,17 @@ def load_gdp_data(path=None):
     df["date"] = df["quarter"].apply(quarter_to_date)
     df = df.dropna(subset=["real_gdp"])
 
+    if path == PROJECT_ROOT / "real_gdp.csv" or path is None:
+        _gdp_cache = df
+
     return df
 
 
 def load_population_data(path=None):
+    global _pop_cache
+    if _pop_cache is not None and path is None:
+        return _pop_cache
+
     path = path or PROJECT_ROOT / "population.csv"
     raw = pd.read_csv(path, encoding="utf-8-sig")
 
@@ -54,6 +69,9 @@ def load_population_data(path=None):
     df["year"] = df["year"].astype(int)
     df["population"] = pd.to_numeric(df["population"], errors="coerce") * 1000
     df = df.dropna(subset=["population"])
+
+    if path == PROJECT_ROOT / "population.csv" or path is None:
+        _pop_cache = df
 
     return df
 

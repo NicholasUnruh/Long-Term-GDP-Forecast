@@ -144,11 +144,13 @@ def run_forecast(config: dict) -> dict[str, Any]:
         end_year=end_year,
     )
 
-    # GDP per capita (annual) — include historical data from 2010+
+    # GDP per capita (annual) — combine historical + forecast on the fly
+    # (we don't store the combined DF to save ~45MB per job)
     historical_gdp = gdp_df[gdp_df["date"].dt.year >= 2010].copy()
     historical_gdp["is_forecast"] = False
     combined_gdp = pd.concat([historical_gdp, gdp_forecast], ignore_index=True)
     gdp_pc_annual = compute_annual_gdp_per_capita(combined_gdp, pop_forecast)
+    del combined_gdp  # free the temporary combined DF
 
     # Derived analytics
     summary = compute_summary_metrics(gdp_forecast, pop_forecast, gdp_pc_annual, end_year)
@@ -157,7 +159,6 @@ def run_forecast(config: dict) -> dict[str, Any]:
 
     return {
         "gdp_forecast": gdp_forecast,
-        "gdp_combined": combined_gdp,
         "pop_forecast": pop_forecast,
         "gdp_pc_annual": gdp_pc_annual,
         "summary": summary,

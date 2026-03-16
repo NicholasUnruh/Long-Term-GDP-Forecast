@@ -47,9 +47,29 @@ router = APIRouter(prefix="/forecast", tags=["forecast"])
 #     "created_at": str, "completed_at": str|None, "results": dict|None }
 _jobs: dict[str, dict[str, Any]] = {}
 
+# Maximum number of completed jobs to keep in memory.
+# Each job stores ~80MB of DataFrames. On Railway free tier (512MB-1GB),
+# keeping more than 3-5 jobs risks OOM.
+_MAX_JOBS = 5
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _evict_old_jobs() -> None:
+    """Remove oldest completed jobs when we exceed _MAX_JOBS."""
+    completed = [
+        (jid, j) for jid, j in _jobs.items()
+        if j["status"] in ("completed", "failed") and jid != "baseline"
+    ]
+    if len(completed) + 1 <= _MAX_JOBS:  # +1 for baseline
+        return
+    # Sort by created_at, evict oldest
+    completed.sort(key=lambda x: x[1]["created_at"])
+    to_remove = len(completed) + 1 - _MAX_JOBS
+    for jid, _ in completed[:to_remove]:
+        del _jobs[jid]
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +103,8 @@ async def run_forecast_endpoint(request: ForecastRequest | None = None):
     Returns immediately with a ``job_id`` that can be used to poll
     status and retrieve results.
     """
+    _evict_old_jobs()
+
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         "status": "queued",
@@ -278,9 +300,18 @@ async def export_forecast(job_id: str):
     """Export GDP per capita in wide format from 2010 onward (historical + forecast)."""
     import numpy as np
 
+    from src.data_loader import load_gdp_data, align_state_names, load_population_data
+
     results = _get_results(job_id)
-    gdp_df = results["gdp_combined"].copy()
-    pop_df = results["pop_forecast"].copy()
+
+    # Rebuild combined GDP (historical + forecast) on demand instead of storing it
+    raw_gdp = load_gdp_data()
+    raw_pop = load_population_data()
+    raw_gdp, _ = align_state_names(raw_gdp, raw_pop)
+    historical = raw_gdp[raw_gdp["date"].dt.year >= 2010].copy()
+    historical["is_forecast"] = False
+    gdp_df = pd.concat([historical, results["gdp_forecast"]], ignore_index=True)
+    pop_df = results["pop_forecast"]
 
     # Compute quarterly per-capita
     gdp_df["year"] = gdp_df["date"].dt.year
