@@ -41,6 +41,16 @@ LEAF_INDUSTRIES = [
     "State and local",
 ]
 
+# Growth mode per industry: "exponential" compounds quarterly,
+# "linear" uses a fixed dollar increment derived from CAGR * base_gdp.
+# Industries not in this dict default to "linear".
+DEFAULT_GROWTH_MODES: dict[str, str] = {
+    "Information": "exponential",
+    "Professional, scientific, and technical services": "exponential",
+    "Finance and insurance": "exponential",
+    "Management of companies and enterprises": "exponential",
+}
+
 ALL_FORECAST_INDUSTRIES = LEAF_INDUSTRIES + list(SUB_AGGREGATE_INDUSTRIES.keys()) + AGGREGATE_INDUSTRIES
 
 

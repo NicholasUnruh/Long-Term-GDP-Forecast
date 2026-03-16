@@ -23,13 +23,13 @@ class ForecastHorizon(BaseModel):
         description="Start year for historical CAGR computation. null = use all available data (2005+).",
     )
     short_term_years: int = Field(
-        default=0,
+        default=10,
         ge=0,
         le=15,
         description="Years to apply the short-term CAGR before switching to long-term. 0 = disabled.",
     )
     short_term_start_year: Optional[int] = Field(
-        default=2015,
+        default=2019,
         ge=2005,
         le=2024,
         description="Historical range start for short-term CAGR computation.",
@@ -43,6 +43,11 @@ class ForecastHorizon(BaseModel):
     cagr_overrides: dict[str, float] = Field(
         default_factory=dict,
         description="Per state-industry CAGR caps. Keys are 'State|Industry', values are max annual CAGR. Overrides the global cagr_cap for specific pairs.",
+    )
+    growth_modes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-industry growth projection mode: 'linear' or 'exponential'. "
+                    "Industries not listed default to 'linear'.",
     )
 
 

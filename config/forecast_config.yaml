@@ -43,8 +43,8 @@ forecast:
   # (e.g. tech boom) more heavily in the near term while reverting to a
   # longer-run average afterward.
   # Set short_term_years to 0 to disable (use long-term rate for entire forecast).
-  short_term_years: 0              # Years to apply the short-term rate (0 = disabled)
-  short_term_start_year: 2015      # Historical range start for the short-term CAGR
+  short_term_years: 10             # Years to apply the short-term rate (0 = disabled)
+  short_term_start_year: 2019      # Historical range start for the short-term CAGR
 
   # Maximum annual CAGR (absolute value) allowed per state-industry pair.
   # Caps extreme growth rates to prevent unrealistic compounding over 25+ years.
@@ -53,6 +53,18 @@ forecast:
   # Use the CAGR preview on the configure page to inspect outliers before choosing a cap.
   # Range: 0 (no cap) to 0.10 (permissive, ~10%)
   cagr_cap: 0
+
+  # Growth projection mode per industry: "linear" or "exponential".
+  # Linear: fixed dollar increment per quarter (increment = base_gdp * quarterly_CAGR).
+  #   Produces steady, non-compounding growth — appropriate for most industries.
+  # Exponential: compound growth each quarter (gdp * (1 + rate)).
+  #   Produces accelerating growth — appropriate for AI-affected industries.
+  # Industries not listed here default to "linear".
+  growth_modes:
+    "Information": "exponential"
+    "Professional, scientific, and technical services": "exponential"
+    "Finance and insurance": "exponential"
+    "Management of companies and enterprises": "exponential"
 
 
 # ==============================================================================

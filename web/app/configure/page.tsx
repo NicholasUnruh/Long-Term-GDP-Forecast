@@ -91,10 +91,11 @@ function getDefaultConfig(): ForecastConfig {
       start_quarter: '2025:Q4',
       end_year: 2050,
       historical_range_start_year: null,
-      short_term_years: 0,
-      short_term_start_year: 2015,
+      short_term_years: 10,
+      short_term_start_year: 2019,
       cagr_cap: 0,
       cagr_overrides: {},
+      growth_modes: {},
     },
     population: {
       fit_start_year: 2010,
@@ -225,6 +226,8 @@ export default function ConfigurePage() {
   const [cagrPreview, setCagrPreview] = React.useState<CAGRPreviewRow[]>([]);
   const [cagrLoading, setCagrLoading] = React.useState(false);
   const [cagrShowAll, setCagrShowAll] = React.useState(false);
+  const [cagrSortCol, setCagrSortCol] = React.useState<'cagr' | 'state' | 'industry' | 'base_gdp'>('cagr');
+  const [cagrSortAsc, setCagrSortAsc] = React.useState(false);
 
   // ── Fetch defaults & scenarios on mount ──────────────────────────────────
   React.useEffect(() => {
@@ -252,6 +255,24 @@ export default function ConfigurePage() {
     () => countModified(config, defaults),
     [config, defaults]
   );
+
+  const sortedCagrPreview = React.useMemo(() => {
+    const rows = [...cagrPreview];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      if (cagrSortCol === 'cagr') cmp = Math.abs(a.annual_cagr) - Math.abs(b.annual_cagr);
+      else if (cagrSortCol === 'state') cmp = a.state.localeCompare(b.state) || a.industry.localeCompare(b.industry);
+      else if (cagrSortCol === 'industry') cmp = a.industry.localeCompare(b.industry) || a.state.localeCompare(b.state);
+      else if (cagrSortCol === 'base_gdp') cmp = a.base_gdp - b.base_gdp;
+      return cagrSortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [cagrPreview, cagrSortCol, cagrSortAsc]);
+
+  function toggleCagrSort(col: typeof cagrSortCol) {
+    if (cagrSortCol === col) setCagrSortAsc(!cagrSortAsc);
+    else { setCagrSortCol(col); setCagrSortAsc(col === 'state' || col === 'industry'); }
+  }
 
   // ── Fetch CAGR preview when historical range changes ─────────────────────
   React.useEffect(() => {
@@ -345,6 +366,23 @@ export default function ConfigurePage() {
     }));
   }
 
+  // ── Growth mode helpers ─────────────────────────────────────────────────
+  function setGrowthMode(industry: string, mode: string) {
+    setConfig(prev => ({
+      ...prev,
+      forecast: {
+        ...prev.forecast,
+        growth_modes: { ...prev.forecast.growth_modes, [industry]: mode },
+      },
+    }));
+  }
+
+  function getGrowthMode(industry: string): string {
+    return config.forecast.growth_modes[industry]
+      ?? defaults.forecast.growth_modes?.[industry]
+      ?? 'linear';
+  }
+
   // ── Scenario selection ───────────────────────────────────────────────────
   function selectScenario(scenario: string) {
     setSelectedScenario(scenario);
@@ -378,13 +416,15 @@ export default function ConfigurePage() {
 
       // Forecast section — always send all forecast params if any changed
       const hasOverrides = Object.keys(config.forecast.cagr_overrides).length > 0;
+      const hasGrowthModes = Object.keys(config.forecast.growth_modes).length > 0;
       const fcChanged =
         config.forecast.end_year !== defaults.forecast.end_year ||
         config.forecast.historical_range_start_year !== defaults.forecast.historical_range_start_year ||
         config.forecast.short_term_years !== defaults.forecast.short_term_years ||
         config.forecast.short_term_start_year !== defaults.forecast.short_term_start_year ||
         Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10 ||
-        hasOverrides;
+        hasOverrides ||
+        hasGrowthModes;
       if (fcChanged) {
         request.forecast = {
           end_year: config.forecast.end_year,
@@ -393,6 +433,7 @@ export default function ConfigurePage() {
           short_term_start_year: config.forecast.short_term_start_year,
           cagr_cap: config.forecast.cagr_cap,
           ...(hasOverrides ? { cagr_overrides: config.forecast.cagr_overrides } : {}),
+          ...(hasGrowthModes ? { growth_modes: config.forecast.growth_modes } : {}),
         };
       }
 
@@ -651,15 +692,25 @@ export default function ConfigurePage() {
                         <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
                           <tr className="text-xs text-muted-foreground">
                             <th className="text-left px-2 py-2 font-medium w-8">#</th>
-                            <th className="text-left px-2 py-2 font-medium">State</th>
-                            <th className="text-left px-2 py-2 font-medium">Industry</th>
-                            <th className="text-right px-2 py-2 font-medium">CAGR</th>
-                            <th className="text-right px-2 py-2 font-medium">Base GDP</th>
+                            {([['state', 'State', 'text-left'], ['industry', 'Industry', 'text-left'], ['cagr', 'CAGR', 'text-right'], ['base_gdp', 'Base GDP', 'text-right']] as const).map(([col, label, align]) => (
+                              <th key={col} className={cn('px-2 py-2 font-medium', align)}>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-0.5 hover:text-foreground transition-colors"
+                                  onClick={() => toggleCagrSort(col)}
+                                >
+                                  {label}
+                                  {cagrSortCol === col && (
+                                    <span className="text-foreground">{cagrSortAsc ? '\u25B2' : '\u25BC'}</span>
+                                  )}
+                                </button>
+                              </th>
+                            ))}
                             <th className="text-center px-2 py-2 font-medium">Cap %</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {(cagrShowAll ? cagrPreview : cagrPreview.slice(0, 30)).map((row, i) => {
+                          {(cagrShowAll ? sortedCagrPreview : sortedCagrPreview.slice(0, 30)).map((row, i) => {
                             const pairKey = `${row.state}|${row.industry}`;
                             const pairCap = config.forecast.cagr_overrides[pairKey];
                             const hasPairCap = pairCap !== undefined;
@@ -784,6 +835,83 @@ export default function ConfigurePage() {
                   {' '}This affects {cagrPreview.filter(r => Math.abs(r.annual_cagr) > config.forecast.cagr_cap).length} of {cagrPreview.length} pairs.
                 </div>
               )}
+
+              <Separator />
+
+              {/* ── Growth Mode by Industry ─────────────────────────── */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-semibold">Growth Mode by Industry</Label>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p><strong>Linear:</strong> constant dollar increase each quarter (no compounding). Appropriate for most industries.</p>
+                      <p className="mt-1"><strong>Exponential:</strong> growth compounds quarterly. Appropriate for AI-affected industries with accelerating returns.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Badge variant="secondary">
+                    {LEAF_INDUSTRIES.filter(i => getGrowthMode(i) === 'exponential').length} exponential
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Linear growth adds a fixed dollar amount per quarter. Exponential growth compounds the rate each quarter.
+                  AI-affected industries default to exponential.
+                </p>
+                <div className="rounded-lg border overflow-hidden">
+                  <div className="max-h-80 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
+                        <tr className="text-xs text-muted-foreground">
+                          <th className="text-left px-3 py-2 font-medium">Industry</th>
+                          <th className="text-center px-3 py-2 font-medium w-48">Mode</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {LEAF_INDUSTRIES.map((industry) => {
+                          const mode = getGrowthMode(industry);
+                          return (
+                            <tr key={industry} className="border-t hover:bg-muted/30">
+                              <td className="px-3 py-1.5 truncate max-w-[260px]" title={industry}>
+                                {INDUSTRY_SHORT_NAMES[industry] || industry}
+                              </td>
+                              <td className="px-3 py-1.5 text-center">
+                                <div className="inline-flex rounded-md border text-xs">
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      'px-3 py-1 rounded-l-md transition-colors',
+                                      mode === 'linear'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'hover:bg-muted'
+                                    )}
+                                    onClick={() => setGrowthMode(industry, 'linear')}
+                                  >
+                                    Linear
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      'px-3 py-1 rounded-r-md transition-colors',
+                                      mode === 'exponential'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'hover:bg-muted'
+                                    )}
+                                    onClick={() => setGrowthMode(industry, 'exponential')}
+                                  >
+                                    Exponential
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
             </div>
           </AccordionContent>
         </AccordionItem>

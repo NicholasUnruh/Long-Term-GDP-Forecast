@@ -77,6 +77,7 @@ export interface ForecastConfig {
     short_term_start_year: number;
     cagr_cap: number;
     cagr_overrides: Record<string, number>;
+    growth_modes: Record<string, string>;
   };
   population: {
     fit_start_year: number;

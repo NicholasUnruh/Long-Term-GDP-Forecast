@@ -1,7 +1,7 @@
 # Claude Handoff — GDP Forecast Website Implementation
 
-**Date**: March 11, 2026 (updated Session 7)
-**Status**: Deployed to Railway, dark mode added, Docker Compose working locally
+**Date**: March 16, 2026 (updated Session 8)
+**Status**: CAGR-based model (replaced Cobb-Douglas), memory optimized, deployed to Railway
 
 ---
 
@@ -9,8 +9,8 @@
 
 A full-stack web application wrapping the existing Python GDP forecast engine into 3 pages:
 
-1. **Model Description** (`/`) — Server component with KaTeX equations, Cobb-Douglas explanation, component model cards, industry hierarchy, scenario comparison table, limitations
-2. **Parameter Configuration** (`/configure`) — Full parameter form with 7 accordion sections, scenario presets, sliders+inputs, computed values, "Run Forecast" flow with polling dialog
+1. **Model Description** (`/`) — Server component with KaTeX equations, CAGR methodology explanation, component model cards, industry hierarchy, scenario comparison table, limitations
+2. **Parameter Configuration** (`/configure`) — 3 accordion sections (Forecast Horizon & CAGR, Population, Industry Shifts), CAGR preview table with per-row caps, scenario presets, "Run Forecast" flow with polling dialog
 3. **Results Dashboard** (`/dashboard`) — 4 tabs: Per Capita stacked area chart, GDP Trends line chart, Industry & CAGR (state table + industry bar chart), Data Explorer (paginated 141K row table)
 
 ## Tech Stack
@@ -128,6 +128,50 @@ GET    /data/industries                                 # Leaf, sub-aggregate, a
 - [x] Error boundaries around all chart components
 - [x] Frontend builds cleanly: `npx next build` passes TypeScript + compilation
 - [x] API all 19 routes registered and returning correct data
+
+## Resolved Issues (Session 8 — March 16, 2026)
+
+### Replaced Cobb-Douglas with Historical CAGR Extrapolation
+- **Before**: GDP growth = TFP + alpha*Capital + (1-alpha)*Labor (Cobb-Douglas production function)
+- **After**: GDP growth = historical CAGR per state-industry pair, extrapolated from BEA data
+- Each of 1,173 state-industry pairs gets its own growth rate from observed historical data
+- Configurable historical range via `historical_range_start_year` slider (2005-2024)
+- Removed TFP, Capital, Labor, Production Function sections from configure page (7 sections → 3)
+- Updated home page model description and component cards
+
+### Two-Phase Growth Model (Short-Term + Long-Term CAGR)
+- `short_term_years` (0-15): apply a CAGR from a recent historical window for the first N years
+- `short_term_start_year`: which years to use for the short-term rate (e.g. 2018-2025)
+- After short-term period ends, transitions to long-term CAGR (from full historical range)
+- Lets users weight recent trends (e.g. tech boom) in the near term while reverting to long-run average
+
+### CAGR Preview Table with Per-Pair Caps
+- New `/data/cagr-preview?start_year=` endpoint returns CAGRs for all 1,173 state-industry pairs
+- Configure page shows ranked table with: state, industry, CAGR %, base GDP, 25yr multiplier
+- Rows >5% highlighted in red, capped rows in yellow
+- Per-row "Cap %" input: type a value to cap that specific pair's growth rate
+- Stored as `cagr_overrides` dict (`"State|Industry": max_rate`) in config
+- Global `cagr_cap` slider also available as blanket cap (per-pair overrides take precedence)
+- **Key outliers found**: CA Info 8.67%, WA Info 10.25%, ND Mining 15.42% — compound to absurd values without caps
+
+### Memory Optimizations (Railway OOM fix)
+- **CSV caching**: `load_gdp_data()` / `load_population_data()` parse once, cached in module globals
+- **Job eviction**: Max 5 completed jobs in memory (~39MB each). Oldest evicted on new job creation. Previously accumulated unbounded → OOM.
+- **Removed `gdp_combined`**: Was a 45MB duplicate DataFrame stored per job. Now rebuilt on demand only in export endpoint. Per-job memory: 83MB → 39MB.
+
+### Files Changed (Session 8)
+- `src/gdp_forecast.py` — Complete rewrite: `compute_historical_cagr()`, two-phase growth, per-pair caps
+- `src/data_loader.py` — Added module-level CSV cache
+- `api/models/forecast.py` — Cleaned: removed ProductionFunction/TFP/Capital/Labor models, added CAGR params
+- `api/services/forecast_service.py` — Simplified to 3 config sections, removed `gdp_combined`
+- `api/routers/forecast.py` — Added `_evict_old_jobs()`, `_MAX_JOBS = 5`
+- `api/routers/data.py` — Added `/cagr-preview` and `/historical-range` endpoints
+- `api/main.py` — Updated description
+- `config/forecast_config.yaml` — Added CAGR params, removed Cobb-Douglas sections still work via scenarios
+- `web/app/configure/page.tsx` — Rewritten: 3 sections, CAGR preview table, short-term sliders
+- `web/app/page.tsx` — Updated methodology from Cobb-Douglas to CAGR
+- `web/lib/types.ts` — Simplified ForecastConfig and ForecastRequest
+- `web/lib/api-client.ts` — Added `getCAGRPreview`
 
 ## Resolved Issues (Session 2 — March 11, 2026)
 

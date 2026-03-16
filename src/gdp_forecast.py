@@ -83,6 +83,10 @@ def forecast_state_industry(gdp_df, pop_forecast_df, config, state, industry, en
     pair_cap = cagr_overrides.get(pair_key)
     effective_cap = pair_cap if pair_cap is not None else (cagr_cap if cagr_cap else None)
 
+    # Resolve growth mode for this industry
+    growth_modes = fc_cfg.get("growth_modes", {})
+    growth_mode = growth_modes.get(industry, "linear")
+
     # Long-term CAGR (full range)
     hist_start = fc_cfg.get("historical_range_start_year", None)
     _, lt_growth_q = compute_historical_cagr(
@@ -111,13 +115,24 @@ def forecast_state_industry(gdp_df, pop_forecast_df, config, state, industry, en
     n_gap = len(gap_quarters)
     # Use short-term rate for the gap projection if short-term is active
     gap_rate = st_growth_q if st_quarters > 0 else lt_growth_q
-    projected_base = base_gdp * (1 + gap_rate) ** (n_gap + 1) if n_gap > 0 else base_gdp * (1 + gap_rate)
+    if growth_mode == "exponential":
+        projected_base = base_gdp * (1 + gap_rate) ** (n_gap + 1) if n_gap > 0 else base_gdp * (1 + gap_rate)
+    else:
+        gap_steps = (n_gap + 1) if n_gap > 0 else 1
+        projected_base = base_gdp + base_gdp * gap_rate * gap_steps
 
     gdp_values = [projected_base]
-    for idx in range(1, len(quarters)):
-        # Use short-term rate for the first st_quarters, then long-term
-        rate = st_growth_q if idx < st_quarters else lt_growth_q
-        gdp_values.append(gdp_values[-1] * (1 + rate))
+    if growth_mode == "exponential":
+        for idx in range(1, len(quarters)):
+            rate = st_growth_q if idx < st_quarters else lt_growth_q
+            gdp_values.append(gdp_values[-1] * (1 + rate))
+    else:
+        # Linear: fixed dollar increment per quarter, anchored to projected_base
+        st_increment = projected_base * st_growth_q
+        lt_increment = projected_base * lt_growth_q
+        for idx in range(1, len(quarters)):
+            increment = st_increment if idx < st_quarters else lt_increment
+            gdp_values.append(max(gdp_values[-1] + increment, 0.0))
 
     records = []
     for q, val in zip(quarters, gdp_values):
