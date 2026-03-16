@@ -74,6 +74,7 @@ export interface ForecastConfig {
     end_year: number;
     historical_range_start_year: number | null;
     cagr_cap: number;
+    cagr_overrides: Record<string, number>;
   };
   population: {
     fit_start_year: number;

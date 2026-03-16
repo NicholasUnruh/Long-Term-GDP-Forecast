@@ -69,7 +69,14 @@ def forecast_state_industry(gdp_df, pop_forecast_df, config, state, industry, en
     hist_start = config.get("forecast", {}).get("historical_range_start_year", None)
     cagr_cap = config.get("forecast", {}).get("cagr_cap", 0)  # default 0 = no cap
 
-    _, growth_q = compute_historical_cagr(gdp_df, state, industry, start_year=hist_start, cagr_cap=cagr_cap)
+    # Check for per-pair override (takes precedence over global cap)
+    cagr_overrides = config.get("forecast", {}).get("cagr_overrides", {})
+    pair_key = f"{state}|{industry}"
+    pair_cap = cagr_overrides.get(pair_key)
+
+    effective_cap = pair_cap if pair_cap is not None else (cagr_cap if cagr_cap else None)
+
+    _, growth_q = compute_historical_cagr(gdp_df, state, industry, start_year=hist_start, cagr_cap=effective_cap)
 
     forecast_start_q = config["forecast"]["start_quarter"]
     quarters = generate_quarter_range(forecast_start_q, end_year)

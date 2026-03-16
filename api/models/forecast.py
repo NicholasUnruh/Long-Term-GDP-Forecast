@@ -28,6 +28,10 @@ class ForecastHorizon(BaseModel):
         le=0.20,
         description="Maximum annual CAGR (absolute value) per state-industry. Caps extreme outliers. 0 = no cap.",
     )
+    cagr_overrides: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per state-industry CAGR caps. Keys are 'State|Industry', values are max annual CAGR. Overrides the global cagr_cap for specific pairs.",
+    )
 
 
 class PopulationConfig(BaseModel):

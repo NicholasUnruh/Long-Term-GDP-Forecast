@@ -92,6 +92,7 @@ function getDefaultConfig(): ForecastConfig {
       end_year: 2050,
       historical_range_start_year: null,
       cagr_cap: 0,
+      cagr_overrides: {},
     },
     population: {
       fit_start_year: 2010,
@@ -291,6 +292,27 @@ export default function ConfigurePage() {
     }));
   }
 
+  // ── CAGR per-pair override helpers ───────────────────────────────────────
+  function setCagrOverride(state: string, industry: string, value: number) {
+    const key = `${state}|${industry}`;
+    setConfig(prev => ({
+      ...prev,
+      forecast: {
+        ...prev.forecast,
+        cagr_overrides: { ...prev.forecast.cagr_overrides, [key]: value },
+      },
+    }));
+  }
+
+  function removeCagrOverride(state: string, industry: string) {
+    const key = `${state}|${industry}`;
+    setConfig(prev => {
+      const overrides = { ...prev.forecast.cagr_overrides };
+      delete overrides[key];
+      return { ...prev, forecast: { ...prev.forecast, cagr_overrides: overrides } };
+    });
+  }
+
   // ── Population state override helpers ────────────────────────────────────
   function setPopStateOverride(state: string, value: number) {
     setConfig(prev => ({
@@ -352,11 +374,13 @@ export default function ConfigurePage() {
         request.scenario = selectedScenario;
       }
 
-      // Forecast section (end year + historical range + cagr cap)
+      // Forecast section (end year + historical range + cagr cap + overrides)
+      const hasOverrides = Object.keys(config.forecast.cagr_overrides).length > 0;
       const fcChanged =
         config.forecast.end_year !== defaults.forecast.end_year ||
         config.forecast.historical_range_start_year !== defaults.forecast.historical_range_start_year ||
-        Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10;
+        Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10 ||
+        hasOverrides;
       if (fcChanged) {
         request.forecast = {};
         if (config.forecast.end_year !== defaults.forecast.end_year) {
@@ -367,6 +391,9 @@ export default function ConfigurePage() {
         }
         if (Math.abs(config.forecast.cagr_cap - defaults.forecast.cagr_cap) > 1e-10) {
           request.forecast.cagr_cap = config.forecast.cagr_cap;
+        }
+        if (hasOverrides) {
+          request.forecast.cagr_overrides = config.forecast.cagr_overrides;
         }
       }
 
@@ -563,55 +590,89 @@ export default function ConfigurePage() {
 
                 {cagrPreview.length > 0 && (
                   <div className="rounded-lg border overflow-hidden">
-                    <div className="max-h-80 overflow-y-auto">
+                    <div className="max-h-96 overflow-y-auto">
                       <table className="w-full text-sm">
-                        <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                        <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
                           <tr className="text-xs text-muted-foreground">
-                            <th className="text-left px-3 py-2 font-medium">#</th>
-                            <th className="text-left px-3 py-2 font-medium">State</th>
-                            <th className="text-left px-3 py-2 font-medium">Industry</th>
-                            <th className="text-right px-3 py-2 font-medium">CAGR</th>
-                            <th className="text-right px-3 py-2 font-medium">Base GDP</th>
-                            <th className="text-right px-3 py-2 font-medium">25yr &times;</th>
+                            <th className="text-left px-2 py-2 font-medium w-8">#</th>
+                            <th className="text-left px-2 py-2 font-medium">State</th>
+                            <th className="text-left px-2 py-2 font-medium">Industry</th>
+                            <th className="text-right px-2 py-2 font-medium">CAGR</th>
+                            <th className="text-right px-2 py-2 font-medium">Base GDP</th>
+                            <th className="text-center px-2 py-2 font-medium">Cap %</th>
                           </tr>
                         </thead>
                         <tbody>
                           {(cagrShowAll ? cagrPreview : cagrPreview.slice(0, 30)).map((row, i) => {
-                            const multiplier = Math.pow(1 + row.annual_cagr, 25);
-                            const isCapped = config.forecast.cagr_cap > 0 && Math.abs(row.annual_cagr) > config.forecast.cagr_cap;
+                            const pairKey = `${row.state}|${row.industry}`;
+                            const pairCap = config.forecast.cagr_overrides[pairKey];
+                            const hasPairCap = pairCap !== undefined;
+                            const effectiveCagr = hasPairCap
+                              ? Math.max(-pairCap, Math.min(pairCap, row.annual_cagr))
+                              : config.forecast.cagr_cap > 0
+                                ? Math.max(-config.forecast.cagr_cap, Math.min(config.forecast.cagr_cap, row.annual_cagr))
+                                : row.annual_cagr;
+                            const multiplier = Math.pow(1 + effectiveCagr, 25);
                             const isHigh = Math.abs(row.annual_cagr) > 0.05;
                             return (
                               <tr
-                                key={`${row.state}-${row.industry}`}
+                                key={pairKey}
                                 className={cn(
                                   'border-t transition-colors',
-                                  isCapped && 'bg-yellow-50 dark:bg-yellow-950/20',
-                                  isHigh && !isCapped && 'bg-red-50/50 dark:bg-red-950/10'
+                                  hasPairCap && 'bg-yellow-50 dark:bg-yellow-950/20',
+                                  isHigh && !hasPairCap && 'bg-red-50/50 dark:bg-red-950/10'
                                 )}
                               >
-                                <td className="px-3 py-1.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
-                                <td className="px-3 py-1.5 truncate max-w-[120px]" title={row.state}>
+                                <td className="px-2 py-1 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
+                                <td className="px-2 py-1 truncate max-w-[100px]" title={row.state}>
                                   {row.state}
                                 </td>
-                                <td className="px-3 py-1.5 truncate max-w-[180px]" title={row.industry}>
+                                <td className="px-2 py-1 truncate max-w-[150px]" title={row.industry}>
                                   {INDUSTRY_SHORT_NAMES[row.industry] || row.industry}
                                 </td>
                                 <td className={cn(
-                                  'px-3 py-1.5 text-right font-mono tabular-nums',
+                                  'px-2 py-1 text-right font-mono tabular-nums whitespace-nowrap',
                                   row.annual_cagr > 0.05 && 'text-red-600 dark:text-red-400 font-semibold',
                                   row.annual_cagr < -0.03 && 'text-blue-600 dark:text-blue-400 font-semibold',
                                 )}>
                                   {(row.annual_cagr * 100).toFixed(2)}%
-                                  {isCapped && <span className="ml-1 text-yellow-600 dark:text-yellow-400" title="Will be capped">*</span>}
+                                  {hasPairCap && (
+                                    <span className="ml-1 text-yellow-600 dark:text-yellow-400" title={`Capped → ${(effectiveCagr * 100).toFixed(2)}% (${multiplier.toFixed(1)}x in 25yr)`}>
+                                      {'\u2192'}{(effectiveCagr * 100).toFixed(1)}%
+                                    </span>
+                                  )}
                                 </td>
-                                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
+                                <td className="px-2 py-1 text-right font-mono tabular-nums text-muted-foreground">
                                   {formatGDP(row.base_gdp)}
                                 </td>
-                                <td className={cn(
-                                  'px-3 py-1.5 text-right font-mono tabular-nums',
-                                  multiplier > 5 && 'text-red-600 dark:text-red-400',
-                                )}>
-                                  {multiplier.toFixed(1)}x
+                                <td className="px-2 py-1">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Input
+                                      type="number"
+                                      placeholder="-"
+                                      value={hasPairCap ? parseFloat((pairCap * 100).toFixed(1)) : ''}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value);
+                                        if (!isNaN(v) && v > 0) {
+                                          setCagrOverride(row.state, row.industry, v / 100);
+                                        } else if (e.target.value === '' || e.target.value === '0') {
+                                          removeCagrOverride(row.state, row.industry);
+                                        }
+                                      }}
+                                      step={0.5}
+                                      className="h-6 w-16 text-xs text-center tabular-nums px-1"
+                                    />
+                                    {hasPairCap && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeCagrOverride(row.state, row.industry)}
+                                        className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                                        title="Remove cap"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -621,16 +682,17 @@ export default function ConfigurePage() {
                     </div>
                     <div className="flex items-center justify-between border-t px-3 py-2 bg-muted/30">
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        {config.forecast.cagr_cap > 0 && (
+                        {Object.keys(config.forecast.cagr_overrides).length > 0 && (
                           <span>
                             <span className="inline-block w-2 h-2 rounded-sm bg-yellow-200 dark:bg-yellow-800 mr-1" />
-                            * = will be capped at {'\u00B1'}{(config.forecast.cagr_cap * 100).toFixed(1)}%
+                            {Object.keys(config.forecast.cagr_overrides).length} pair{Object.keys(config.forecast.cagr_overrides).length !== 1 ? 's' : ''} capped
                           </span>
                         )}
                         <span>
                           <span className="inline-block w-2 h-2 rounded-sm bg-red-100 dark:bg-red-900/30 mr-1" />
                           &gt;5% highlighted
                         </span>
+                        <span className="text-muted-foreground/60">Type a % in Cap to limit that pair</span>
                       </div>
                       {cagrPreview.length > 30 && (
                         <Button
